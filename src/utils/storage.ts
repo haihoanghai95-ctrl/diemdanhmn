@@ -1,0 +1,1020 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, ParentAccount, WeeklyMenu, AbsenceReport, TeacherAccount, HealthRecord, DailyAssessment, TeacherNotification } from '../types';
+import { generateMockEmbedding } from './faceSim';
+import {
+  saveSettingsToFirebase,
+  saveClassroomsToFirebase,
+  saveStudentsToFirebase,
+  saveTeachersToFirebase,
+  saveParentsToFirebase,
+  saveWeeklyMenuToFirebase,
+  saveAbsenceReportsToFirebase,
+  saveAttendanceToFirebase
+} from './firebaseSync';
+
+function handleSyncCatch(err: unknown) {
+  const errMsg = err instanceof Error ? err.message : String(err);
+  if (errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("insufficient")) {
+    console.warn("Firebase Sync Warning: Permissions blocked (Security rules mismatch).");
+  } else {
+    console.error("Firebase sync error:", err);
+  }
+}
+
+const KEYS = {
+  CLASSROOMS: 'sma_classrooms',
+  STUDENTS: 'sma_students',
+  ATTENDANCE: 'sma_attendance',
+  SETTINGS: 'sma_settings',
+  SESSION: 'sma_session',
+  PARENTS: 'sma_parents',
+  TEACHERS: 'sma_teachers',
+  WEEKLY_MENU: 'sma_weekly_menu',
+  ABSENCE_REPORTS: 'sma_absence_reports',
+  HEALTH_RECORDS: 'sma_health_records',
+  DAILY_ASSESSMENTS: 'sma_daily_assessments',
+  TEACHER_NOTIFICATIONS: 'sma_teacher_notifications',
+};
+
+// Thực đơn tuần mầm non mặc định
+const DEFAULT_WEEKLY_MENU: WeeklyMenu = {
+  id: 'week_current',
+  classroomId: 'all',
+  menu: {
+    monday: {
+      breakfast: 'Súp gà ngô ngọt hạt sen dinh dưỡng',
+      morningSnack: 'Sữa chua uống Proby lên men',
+      lunch: 'Cơm gạo dẻo thơm, Cá quả kho tộ mềm, Canh rau dền đỏ thịt băm, Dưa hấu lòng đỏ',
+      afternoonSnack: 'Bánh flan sữa tươi caramen ngọt ngào'
+    },
+    tuesday: {
+      breakfast: 'Cháo sườn heo non hạt sen bùi ngậy',
+      morningSnack: 'Nước ép cam sành nguyên chất',
+      lunch: 'Cơm thịt heo bọc trứng cút sốt cà chua, Canh bí đỏ nấu mọc gà, Chuối ngự tiêu chín',
+      afternoonSnack: 'Chè đậu xanh hạt sen thanh nhiệt'
+    },
+    wednesday: {
+      breakfast: 'Nui xào thịt bò Úc sốt bơ tỏi',
+      morningSnack: 'Sữa chua dẻo nếp cẩm hạt sen',
+      lunch: 'Cơm trắng, Tôm sú rim thịt ba chỉ rim keo, Canh cải bó xôi thịt băm, Táo Gala',
+      afternoonSnack: 'Bánh mì sandwich phết bơ phô mai ấm'
+    },
+    thursday: {
+      breakfast: 'Phở gà ta xé phay bánh phở tươi',
+      morningSnack: 'Sữa yến mạch hạt điều tự nấu hảo hạng',
+      lunch: 'Cơm trắng mềm, Đùi gà rô ti nước dừa xiêm, Canh khoai tây cà rốt hầm sườn, Lê ngọt quả lê',
+      afternoonSnack: 'Bánh bông lan trứng muối tươi mềm mại'
+    },
+    friday: {
+      breakfast: 'Cháo cá hồi Na Uy bông cải xanh',
+      morningSnack: 'Nước sinh tố xoài cát Hòa Lộc',
+      lunch: 'Cơm chiên Dương Châu màu sắc, Thịt bò xào bông thiên lý, Canh cải cúc tôm nõn, Thạch rau câu dừa',
+      afternoonSnack: 'Trái cây thập cẩm xắt hạt lựu dầm sữa tươi'
+    }
+  }
+};
+
+// Cài đặt mặc định
+const DEFAULT_SETTINGS: SchoolSettings = {
+  startTime: '07:30',
+  lateTime: '07:45',
+  schoolName: 'TRƯỜNG MẦM NON 3 - PHƯỜNG BÀN CỜ TP.HỒ CHÍ MINH',
+  themeColor: 'rose',
+  darkMode: false,
+};
+
+// Dữ liệu lớp học ban đầu (Seed Data)
+const INITIAL_CLASSROOMS: Classroom[] = [
+  { 
+    id: 'c1', 
+    name: 'Lớp 12A1', 
+    description: 'Niên khóa 2023 - 2026 | Khối tự nhiên chuyên Toán', 
+    talentFee: 500000,
+    talentSubjects: [
+      { id: 't1_1', name: 'Mỹ thuật', fee: 300000, schedule: 'Thứ Hai, Thứ Tư', timeSlot: '16:30 - 17:30' },
+      { id: 't1_2', name: 'Đàn Piano', fee: 200000, schedule: 'Thứ Ba, Thứ Năm', timeSlot: '17:00 - 18:00' }
+    ],
+    createdBy: 'admin'
+  },
+  { 
+    id: 'c2', 
+    name: 'Lớp 12A2', 
+    description: 'Niên khóa 2023 - 2026 | Khối tự nhiên chuyên Lý', 
+    talentFee: 450000,
+    talentSubjects: [
+      { id: 't2_1', name: 'Múa bale', fee: 250000, schedule: 'Thứ Hai, Thứ Sáu', timeSlot: '16:15 - 17:15' },
+      { id: 't2_2', name: 'Võ thuật', fee: 200000, schedule: 'Thứ Tư, Thứ Bảy', timeSlot: '15:30 - 16:30' }
+    ],
+    createdBy: '0911111111' // Cô Mai
+  },
+  { 
+    id: 'c3', 
+    name: 'Lớp 11B1', 
+    description: 'Niên khóa 2024 - 2027 | Khối xã hội chuyên Anh', 
+    talentFee: 600000,
+    talentSubjects: [
+      { id: 't3_1', name: 'Cờ vua', fee: 300000, schedule: 'Thứ Năm, Thứ Sáu', timeSlot: '16:30 - 17:30' },
+      { id: 't3_2', name: 'Bóng rổ', fee: 300000, schedule: 'Thứ Tư, Chủ Nhật', timeSlot: '08:00 - 09:30' }
+    ],
+    createdBy: '0922222222' // Cô Lan
+  },
+  { 
+    id: 'c4', 
+    name: 'Lớp 10C1', 
+    description: 'Niên khóa 2025 - 2028 | Khối chuyên Tin học', 
+    talentFee: 550000,
+    talentSubjects: [
+      { id: 't4_1', name: 'Lập trình Scratch', fee: 350000, schedule: 'Thứ Bảy, Chủ Nhật', timeSlot: '14:00 - 15:30' },
+      { id: 't4_2', name: 'Kỹ năng mềm', fee: 200000, schedule: 'Thứ Ba, Thứ Năm', timeSlot: '16:30 - 17:30' }
+    ],
+    createdBy: 'admin'
+  },
+];
+
+const INITIAL_TEACHERS: TeacherAccount[] = [
+  {
+    phone: '0911111111',
+    name: 'Cô Mai',
+    password: '54321',
+    dob: '1990-05-15',
+    address: '123 Đường Lê Lợi, Quận 1, TP. HCM',
+    hometown: 'Bến Tre',
+    gender: 'Nữ',
+    cccd: '079190012345',
+    position: 'Giáo viên chủ nhiệm',
+    isPartyMember: true
+  },
+  {
+    phone: '0922222222',
+    name: 'Cô Lan',
+    password: '54321',
+    dob: '1992-11-20',
+    address: '456 Đường Nguyễn Trãi, Quận 5, TP. HCM',
+    hometown: 'Đồng Tháp',
+    gender: 'Nữ',
+    cccd: '080192009876',
+    position: 'Giáo viên bộ môn',
+    isPartyMember: false
+  },
+];
+
+// Tạo ảnh đại diện mô phỏng bằng canvas SVG hoặc CSS gradients
+function generateAvatar(name: string, bgIndex: number): string {
+  const colors = [
+    'linear-gradient(135deg, #3b82f6, #1d4ed8)', // Blue
+    'linear-gradient(135deg, #10b981, #047857)', // Emerald
+    'linear-gradient(135deg, #8b5cf6, #5b21b6)', // Violet
+    'linear-gradient(135deg, #ec4899, #be185d)', // Rose
+    'linear-gradient(135deg, #f59e0b, #b45309)', // Amber
+  ];
+  const color = colors[bgIndex % colors.length];
+  const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  
+  // Tạo chuỗi SVG mã hóa Base64
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+    <defs>
+      <linearGradient id="grad${bgIndex}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:${bgIndex === 0 ? '#3b82f6' : bgIndex === 1 ? '#10b981' : bgIndex === 2 ? '#8b5cf6' : bgIndex === 3 ? '#ec4899' : '#f59e0b'}" />
+        <stop offset="100%" style="stop-color:${bgIndex === 0 ? '#1d4ed8' : bgIndex === 1 ? '#047857' : bgIndex === 2 ? '#5b21b6' : bgIndex === 3 ? '#be185d' : '#b45309'}" />
+      </linearGradient>
+    </defs>
+    <rect width="100" height="100" fill="url(#grad${bgIndex})" />
+    <text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="#ffffff">${initials}</text>
+  </svg>`;
+  
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+}
+
+// Dữ liệu học sinh ban đầu (Seed Data)
+const INITIAL_STUDENTS = (classrooms: Classroom[]): Student[] => [
+  {
+    id: 's1',
+    studentCode: 'HS230101',
+    fullName: 'Nguyễn Hoàng Nam',
+    gender: 'Nam',
+    dateOfBirth: '2008-05-14',
+    address: '15 Tạ Quang Bửu, Hai Bà Trưng, Hà Nội',
+    parentPhone: '0912345678',
+    email: 'nam.nh230101@school.edu.vn',
+    classId: 'c1',
+    avatar: generateAvatar('Nguyễn Hoàng Nam', 0),
+    faceImage: generateAvatar('Nguyễn Hoàng Nam', 0),
+    faceEmbedding: generateMockEmbedding('Nguyễn Hoàng Nam'),
+    registeredTalentSubjects: ['t1_1'],
+    talentFee: 300000,
+    talentFeePaid: false,
+    talentFeeDueDate: '2026-07-01' // Quá hạn hơn 3 ngày so với 2026-07-08
+  },
+  {
+    id: 's2',
+    studentCode: 'HS230102',
+    fullName: 'Trần Thị Mai Anh',
+    gender: 'Nữ',
+    dateOfBirth: '2008-11-23',
+    address: '88 Láng Hạ, Đống Đa, Hà Nội',
+    parentPhone: '0987654321',
+    email: 'anh.ttm230102@school.edu.vn',
+    classId: 'c1',
+    avatar: generateAvatar('Trần Thị Mai Anh', 1),
+    faceImage: generateAvatar('Trần Thị Mai Anh', 1),
+    faceEmbedding: generateMockEmbedding('Trần Thị Mai Anh'),
+    registeredTalentSubjects: ['t1_2'],
+    talentFee: 200000,
+    talentFeePaid: true,
+    talentFeeDueDate: '2026-07-01'
+  },
+  {
+    id: 's3',
+    studentCode: 'HS230103',
+    fullName: 'Lê Minh Đức',
+    gender: 'Nam',
+    dateOfBirth: '2008-02-05',
+    address: '124 Hoàng Hoa Thám, Ba Đình, Hà Nội',
+    parentPhone: '0903334445',
+    email: 'duc.lm230103@school.edu.vn',
+    classId: 'c1',
+    avatar: generateAvatar('Lê Minh Đức', 2),
+    faceImage: generateAvatar('Lê Minh Đức', 2),
+    faceEmbedding: generateMockEmbedding('Lê Minh Đức'),
+  },
+  {
+    id: 's4',
+    studentCode: 'HS230201',
+    fullName: 'Phạm Hồng Minh',
+    gender: 'Nam',
+    dateOfBirth: '2008-07-19',
+    address: '56 Nguyễn Trãi, Thanh Xuân, Hà Nội',
+    parentPhone: '0945556667',
+    email: 'minh.ph230201@school.edu.vn',
+    classId: 'c2',
+    avatar: generateAvatar('Phạm Hồng Minh', 3),
+    faceImage: generateAvatar('Phạm Hồng Minh', 3),
+    faceEmbedding: generateMockEmbedding('Phạm Hồng Minh'),
+    registeredTalentSubjects: ['t2_1'],
+    talentFee: 250000,
+    talentFeePaid: false,
+    talentFeeDueDate: '2026-07-02' // Quá hạn hơn 3 ngày so với 2026-07-08
+  },
+  {
+    id: 's5',
+    studentCode: 'HS230202',
+    fullName: 'Vũ Thùy Linh',
+    gender: 'Nữ',
+    dateOfBirth: '2008-09-30',
+    address: '210 Cầu Giấy, Cầu Giấy, Hà Nội',
+    parentPhone: '0911223344',
+    email: 'linh.vt230202@school.edu.vn',
+    classId: 'c2',
+    avatar: generateAvatar('Vũ Thùy Linh', 4),
+    faceImage: generateAvatar('Vũ Thùy Linh', 4),
+    faceEmbedding: generateMockEmbedding('Vũ Thùy Linh'),
+  },
+  {
+    id: 's6',
+    studentCode: 'HS240101',
+    fullName: 'Hoàng Bảo Trân',
+    gender: 'Nữ',
+    dateOfBirth: '2009-03-12',
+    address: '45 Trần Hưng Đạo, Hoàn Kiếm, Hà Nội',
+    parentPhone: '0977889900',
+    email: 'tran.hb240101@school.edu.vn',
+    classId: 'c3',
+    avatar: generateAvatar('Hoàng Bảo Trân', 0),
+    faceImage: generateAvatar('Hoàng Bảo Trân', 0),
+    faceEmbedding: generateMockEmbedding('Hoàng Bảo Trân'),
+  },
+  {
+    id: 's7',
+    studentCode: 'HS240102',
+    fullName: 'Đỗ Anh Tuấn',
+    gender: 'Nam',
+    dateOfBirth: '2009-10-08',
+    address: '320 Mỹ Đình, Nam Từ Liêm, Hà Nội',
+    parentPhone: '0966554433',
+    email: 'tuan.da240102@school.edu.vn',
+    classId: 'c3',
+    avatar: generateAvatar('Đỗ Anh Tuấn', 1),
+    faceImage: generateAvatar('Đỗ Anh Tuấn', 1),
+    faceEmbedding: generateMockEmbedding('Đỗ Anh Tuấn'),
+  },
+];
+
+// Tạo lịch sử điểm danh mẫu (Seed Attendance) cho 5 ngày qua
+const INITIAL_ATTENDANCE = (students: Student[], classrooms: Classroom[]): AttendanceRecord[] => {
+  const records: AttendanceRecord[] = [];
+  const today = new Date();
+  
+  // Tạo lịch sử trong 5 ngày gần đây (loại trừ hôm nay để người dùng tự điểm danh)
+  for (let i = 4; i >= 1; i--) {
+    const d = new Date();
+    d.setDate(today.getDate() - i);
+    
+    // Bỏ qua Thứ Bảy, Chủ Nhật
+    const dayOfWeek = d.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+    
+    const dateString = d.toISOString().split('T')[0];
+    
+    students.forEach((student) => {
+      const cls = classrooms.find(c => c.id === student.classId);
+      if (!cls) return;
+      
+      // Ngẫu nhiên trạng thái: 80% đúng giờ, 12% đi muộn, 8% vắng mặt
+      const rand = Math.random();
+      let status: 'present' | 'late' | 'absent' = 'present';
+      let timeString = '07:15:24';
+      
+      if (rand < 0.08) {
+        status = 'absent';
+        timeString = '--:--:--';
+      } else if (rand < 0.20) {
+        status = 'late';
+        // Giờ đi học muộn ngẫu nhiên từ 07:46 đến 08:15
+        const mm = Math.floor(Math.random() * 30) + 46;
+        const ss = Math.floor(Math.random() * 60);
+        timeString = `07:${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
+      } else {
+        status = 'present';
+        // Giờ đi học đúng giờ ngẫu nhiên từ 07:00 đến 07:35
+        const mm = Math.floor(Math.random() * 35);
+        const ss = Math.floor(Math.random() * 60);
+        timeString = `07:${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
+      }
+      
+      records.push({
+        id: `att_${student.id}_${dateString}`,
+        studentId: student.id,
+        studentCode: student.studentCode,
+        studentName: student.fullName,
+        classId: student.classId,
+        className: cls.name,
+        date: dateString,
+        time: timeString,
+        status,
+        notes: status === 'late' ? 'Đi xe buýt muộn' : status === 'absent' ? 'Nghỉ ốm có phép' : 'Đúng giờ',
+      });
+    });
+  }
+  
+  return records;
+};
+
+// Dữ liệu phụ huynh ban đầu (Seed Parents)
+const INITIAL_PARENTS: ParentAccount[] = [
+  { phone: '0912345678', name: 'Nguyễn Hoàng Hùng', password: '123' },
+  { phone: '0987654321', name: 'Trần Quốc Anh', password: '123' },
+  { phone: '0903334445', name: 'Lê Minh Hưng', password: '123' },
+];
+
+// Dữ liệu xin nghỉ học ban đầu (Seed Absence Reports)
+const INITIAL_ABSENCE_REPORTS: AbsenceReport[] = [
+  {
+    id: 'abs_rep_1',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    className: 'Lớp 12A1',
+    startDate: '2026-07-01',
+    endDate: '2026-07-02',
+    reason: 'Cháu bị sốt nhẹ mọc răng, gia đình xin phép cho nghỉ học 2 ngày ở nhà theo dõi.',
+    status: 'approved',
+    createdAt: '2026-06-30T13:30:00Z',
+    parentPhone: '0912345678',
+  },
+  {
+    id: 'abs_rep_2',
+    studentId: 's2',
+    studentName: 'Trần Thị Mai Anh',
+    classId: 'c1',
+    className: 'Lớp 12A1',
+    startDate: '2026-07-08',
+    endDate: '2026-07-08',
+    reason: 'Gia đình bận đưa bé về quê nội ăn giỗ.',
+    status: 'pending',
+    createdAt: '2026-07-07T02:15:00Z',
+    parentPhone: '0987654321',
+  }
+];
+
+const INITIAL_HEALTH_RECORDS: HealthRecord[] = [
+  // --- THÁNG 03/2026 ---
+  {
+    id: 'hr_m3_1',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    date: '2026-03-15',
+    height: 170,
+    weight: 59,
+    bmi: 20.42,
+    status: 'Bình thường',
+    notes: 'Bé khoẻ mạnh, ăn uống tốt.'
+  },
+  {
+    id: 'hr_m3_2',
+    studentId: 's2',
+    studentName: 'Trần Thị Mai Anh',
+    classId: 'c1',
+    date: '2026-03-15',
+    height: 158,
+    weight: 43,
+    bmi: 17.22,
+    status: 'Bình thường',
+    notes: 'Thể trạng tốt.'
+  },
+  {
+    id: 'hr_m3_3',
+    studentId: 's3',
+    studentName: 'Lê Minh Đức',
+    classId: 'c1',
+    date: '2026-03-15',
+    height: 173,
+    weight: 49,
+    bmi: 16.37,
+    status: 'Bình thường',
+    notes: 'Thể chất bình thường, cần ăn thêm rau.'
+  },
+  {
+    id: 'hr_m3_4',
+    studentId: 's4',
+    studentName: 'Phạm Hồng Minh',
+    classId: 'c2',
+    date: '2026-03-15',
+    height: 163,
+    weight: 65,
+    bmi: 24.46,
+    status: 'Dư cân',
+    notes: 'Hơi có xu hướng dư cân nhẹ.'
+  },
+
+  // --- THÁNG 04/2026 ---
+  {
+    id: 'hr_m4_1',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    date: '2026-04-15',
+    height: 170.5,
+    weight: 60,
+    bmi: 20.64,
+    status: 'Bình thường',
+    notes: 'Phát triển ổn định.'
+  },
+  {
+    id: 'hr_m4_2',
+    studentId: 's2',
+    studentName: 'Trần Thị Mai Anh',
+    classId: 'c1',
+    date: '2026-04-15',
+    height: 158.5,
+    weight: 43.5,
+    bmi: 17.31,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m4_3',
+    studentId: 's3',
+    studentName: 'Lê Minh Đức',
+    classId: 'c1',
+    date: '2026-04-15',
+    height: 173.5,
+    weight: 50,
+    bmi: 16.61,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m4_4',
+    studentId: 's4',
+    studentName: 'Phạm Hồng Minh',
+    classId: 'c2',
+    date: '2026-04-15',
+    height: 163.6,
+    weight: 65.8,
+    bmi: 24.58,
+    status: 'Dư cân'
+  },
+
+  // --- THÁNG 05/2026 ---
+  {
+    id: 'hr_m5_1',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    date: '2026-05-15',
+    height: 171.2,
+    weight: 61,
+    bmi: 20.81,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m5_2',
+    studentId: 's2',
+    studentName: 'Trần Thị Mai Anh',
+    classId: 'c1',
+    date: '2026-05-15',
+    height: 159.2,
+    weight: 44.2,
+    bmi: 17.44,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m5_3',
+    studentId: 's3',
+    studentName: 'Lê Minh Đức',
+    classId: 'c1',
+    date: '2026-05-15',
+    height: 174.2,
+    weight: 51,
+    bmi: 16.81,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m5_4',
+    studentId: 's4',
+    studentName: 'Phạm Hồng Minh',
+    classId: 'c2',
+    date: '2026-05-15',
+    height: 164.2,
+    weight: 66.7,
+    bmi: 24.74,
+    status: 'Dư cân'
+  },
+
+  // --- THÁNG 06/2026 ---
+  {
+    id: 'hr_1',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    date: '2026-06-15',
+    height: 172,
+    weight: 62,
+    bmi: 20.96,
+    status: 'Bình thường',
+    notes: 'Bé phát triển cân đối, sức khỏe tốt.'
+  },
+  {
+    id: 'hr_2',
+    studentId: 's2',
+    studentName: 'Trần Thị Mai Anh',
+    classId: 'c1',
+    date: '2026-06-15',
+    height: 160,
+    weight: 45,
+    bmi: 17.58,
+    status: 'Bình thường',
+    notes: 'Thể trạng tốt, cần duy trì dinh dưỡng.'
+  },
+  {
+    id: 'hr_3',
+    studentId: 's3',
+    studentName: 'Lê Minh Đức',
+    classId: 'c1',
+    date: '2026-06-15',
+    height: 175,
+    weight: 52,
+    bmi: 16.98,
+    status: 'Suy dinh dưỡng',
+    notes: 'Bé hơi nhẹ cân, gia đình nên bổ sung thêm bữa phụ cho bé.'
+  },
+  {
+    id: 'hr_4',
+    studentId: 's4',
+    studentName: 'Phạm Hồng Minh',
+    classId: 'c2',
+    date: '2026-06-15',
+    height: 165,
+    weight: 68,
+    bmi: 24.98,
+    status: 'Dư cân',
+    notes: 'Hơi có xu hướng dư cân nhẹ. Nên hạn chế đồ ăn nhanh, tinh bột.'
+  },
+
+  // --- THÁNG 07/2026 ---
+  {
+    id: 'hr_m7_1',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    date: '2026-07-05',
+    height: 172.5,
+    weight: 62.5,
+    bmi: 20.97,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m7_2',
+    studentId: 's2',
+    studentName: 'Trần Thị Mai Anh',
+    classId: 'c1',
+    date: '2026-07-05',
+    height: 160.4,
+    weight: 45.5,
+    bmi: 17.68,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m7_3',
+    studentId: 's3',
+    studentName: 'Lê Minh Đức',
+    classId: 'c1',
+    date: '2026-07-05',
+    height: 175.5,
+    weight: 53,
+    bmi: 17.21,
+    status: 'Bình thường'
+  },
+  {
+    id: 'hr_m7_4',
+    studentId: 's4',
+    studentName: 'Phạm Hồng Minh',
+    classId: 'c2',
+    date: '2026-07-05',
+    height: 165.5,
+    weight: 68.5,
+    bmi: 25.01,
+    status: 'Béo phì'
+  }
+];
+
+const INITIAL_DAILY_ASSESSMENTS: DailyAssessment[] = [
+  {
+    id: 'da_1',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    date: '2026-07-10',
+    healthStatus: 'Khỏe mạnh',
+    diningStatus: 'Ăn ngoan/hết suất',
+    sleepStatus: 'Ngủ ngon/đủ giấc',
+    activityStatus: 'Năng nổ',
+    hygieneStatus: 'Bình thường',
+    notes: 'Hôm nay con học rất ngoan, ăn hết suất nhanh và biết nhường đồ chơi cho các bạn khác.',
+    createdAt: '2026-07-10T08:00:00.000Z'
+  },
+  {
+    id: 'da_2',
+    studentId: 's2',
+    studentName: 'Trần Thị Mai Anh',
+    classId: 'c1',
+    date: '2026-07-10',
+    healthStatus: 'Mệt mỏi',
+    diningStatus: 'Ăn một nửa',
+    sleepStatus: 'Khó ngủ',
+    activityStatus: 'Bình thường',
+    hygieneStatus: 'Bình thường',
+    notes: 'Hôm nay con có vẻ hơi mệt, ăn ít hơn mọi ngày và khó vào giấc ngủ trưa. Cô đã theo dõi nhiệt độ thấy bình thường.',
+    createdAt: '2026-07-10T08:05:00.000Z'
+  },
+  {
+    id: 'da_3',
+    studentId: 's3',
+    studentName: 'Lê Minh Đức',
+    classId: 'c1',
+    date: '2026-07-10',
+    healthStatus: 'Khỏe mạnh',
+    diningStatus: 'Ăn ngoan/hết suất',
+    sleepStatus: 'Ngủ ngon/đủ giấc',
+    activityStatus: 'Năng nổ',
+    hygieneStatus: 'Bình thường',
+    notes: 'Con tham gia tích cực hoạt động múa hát và vẽ tranh đất nặn cùng cả lớp.',
+    createdAt: '2026-07-10T08:10:00.000Z'
+  },
+  {
+    id: 'da_4',
+    studentId: 's1',
+    studentName: 'Nguyễn Hoàng Nam',
+    classId: 'c1',
+    date: '2026-07-09',
+    healthStatus: 'Khỏe mạnh',
+    diningStatus: 'Ăn ngoan/hết suất',
+    sleepStatus: 'Ngủ ngon/đủ giấc',
+    activityStatus: 'Bình thường',
+    hygieneStatus: 'Bình thường',
+    notes: 'Nam chơi hòa đồng với các bạn trong lớp, chiều ăn xế bánh sữa rất ngoan.',
+    createdAt: '2026-07-09T08:00:00.000Z'
+  }
+];
+
+export class StorageService {
+  public static initialize() {
+    // 1. Cài đặt
+    if (!localStorage.getItem(KEYS.SETTINGS)) {
+      localStorage.setItem(KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
+    } else {
+      try {
+        const current = JSON.parse(localStorage.getItem(KEYS.SETTINGS) || '{}');
+        if (current && (current.themeColor !== 'rose' || current.darkMode !== false)) {
+          current.themeColor = 'rose';
+          current.darkMode = false;
+          localStorage.setItem(KEYS.SETTINGS, JSON.stringify(current));
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    // 2. Lớp học
+    if (!localStorage.getItem(KEYS.CLASSROOMS)) {
+      localStorage.setItem(KEYS.CLASSROOMS, JSON.stringify(INITIAL_CLASSROOMS));
+    }
+    
+    // 3. Học sinh
+    if (!localStorage.getItem(KEYS.STUDENTS)) {
+      const cls = JSON.parse(localStorage.getItem(KEYS.CLASSROOMS) || '[]');
+      localStorage.setItem(KEYS.STUDENTS, JSON.stringify(INITIAL_STUDENTS(cls)));
+    }
+    
+    // 4. Điểm danh
+    if (!localStorage.getItem(KEYS.ATTENDANCE)) {
+      const studs = JSON.parse(localStorage.getItem(KEYS.STUDENTS) || '[]');
+      const cls = JSON.parse(localStorage.getItem(KEYS.CLASSROOMS) || '[]');
+      localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(INITIAL_ATTENDANCE(studs, cls)));
+    }
+
+    // 5. Khởi tạo session ban đầu (đã đăng nhập để trải nghiệm dễ dàng, nhưng có thể logout)
+    if (!localStorage.getItem(KEYS.SESSION) && localStorage.getItem('sma_logged_out') !== 'true') {
+      localStorage.setItem(KEYS.SESSION, JSON.stringify({ isAdmin: true, email: 'admin@school.edu.vn' }));
+    }
+
+    // 6. Khởi tạo tài khoản Phụ huynh
+    if (!localStorage.getItem(KEYS.PARENTS)) {
+      localStorage.setItem(KEYS.PARENTS, JSON.stringify(INITIAL_PARENTS));
+    }
+
+    // 6b. Khởi tạo tài khoản Giáo viên
+    if (!localStorage.getItem(KEYS.TEACHERS)) {
+      localStorage.setItem(KEYS.TEACHERS, JSON.stringify(INITIAL_TEACHERS));
+    }
+
+    // 7. Khởi tạo Thực đơn Tuần
+    if (!localStorage.getItem(KEYS.WEEKLY_MENU)) {
+      localStorage.setItem(KEYS.WEEKLY_MENU, JSON.stringify(DEFAULT_WEEKLY_MENU));
+    }
+
+    // 8. Khởi tạo Đăng ký Báo vắng
+    if (!localStorage.getItem(KEYS.ABSENCE_REPORTS)) {
+      localStorage.setItem(KEYS.ABSENCE_REPORTS, JSON.stringify(INITIAL_ABSENCE_REPORTS));
+    }
+
+    // 9. Khởi tạo Sức khỏe
+    if (!localStorage.getItem(KEYS.HEALTH_RECORDS)) {
+      localStorage.setItem(KEYS.HEALTH_RECORDS, JSON.stringify(INITIAL_HEALTH_RECORDS));
+    } else {
+      try {
+        const existing = JSON.parse(localStorage.getItem(KEYS.HEALTH_RECORDS) || '[]');
+        if (existing.length <= 4) {
+          localStorage.setItem(KEYS.HEALTH_RECORDS, JSON.stringify(INITIAL_HEALTH_RECORDS));
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // 10. Khởi tạo Đánh giá hằng ngày
+    if (!localStorage.getItem(KEYS.DAILY_ASSESSMENTS)) {
+      localStorage.setItem(KEYS.DAILY_ASSESSMENTS, JSON.stringify(INITIAL_DAILY_ASSESSMENTS));
+    }
+  }
+
+  // --- TEACHERS ---
+  public static getTeachers(): TeacherAccount[] {
+    this.initialize();
+    try {
+      const list = JSON.parse(localStorage.getItem(KEYS.TEACHERS) || '[]');
+      let changed = false;
+      const migrated = list.map((t: TeacherAccount) => {
+        if (!t.password || t.password === '123') {
+          changed = true;
+          return { ...t, password: '54321' };
+        }
+        return t;
+      });
+      if (changed) {
+        localStorage.setItem(KEYS.TEACHERS, JSON.stringify(migrated));
+      }
+      return migrated;
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveTeachers(teachers: TeacherAccount[]) {
+    localStorage.setItem(KEYS.TEACHERS, JSON.stringify(teachers));
+    saveTeachersToFirebase(teachers).catch(handleSyncCatch);
+  }
+
+  // --- SETTINGS ---
+  public static getSettings(): SchoolSettings {
+    this.initialize();
+    try {
+      return JSON.parse(localStorage.getItem(KEYS.SETTINGS) || '{}');
+    } catch {
+      return DEFAULT_SETTINGS;
+    }
+  }
+
+  public static saveSettings(settings: SchoolSettings) {
+    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
+    // Apply dark mode class to HTML element
+    if (settings.darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    saveSettingsToFirebase(settings).catch(handleSyncCatch);
+  }
+
+  // --- CLASSROOMS ---
+  public static getClassrooms(): Classroom[] {
+    this.initialize();
+    try {
+      const cls = JSON.parse(localStorage.getItem(KEYS.CLASSROOMS) || '[]');
+      const studs = this.getStudents();
+      // Tính toán động số lượng học sinh của từng lớp
+      return cls.map((c: Classroom) => ({
+        ...c,
+        studentCount: studs.filter(s => s.classId === c.id).length,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveClassrooms(classrooms: Classroom[]) {
+    localStorage.setItem(KEYS.CLASSROOMS, JSON.stringify(classrooms));
+    saveClassroomsToFirebase(classrooms).catch(handleSyncCatch);
+  }
+
+  // --- STUDENTS ---
+  public static getStudents(): Student[] {
+    this.initialize();
+    try {
+      const studs = JSON.parse(localStorage.getItem(KEYS.STUDENTS) || '[]');
+      const cls = JSON.parse(localStorage.getItem(KEYS.CLASSROOMS) || '[]');
+      return studs.map((s: Student) => {
+        const matchingClass = cls.find((c: Classroom) => c.id === s.classId);
+        return {
+          ...s,
+          className: matchingClass ? matchingClass.name : 'Chưa xếp lớp',
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveStudents(students: Student[]) {
+    localStorage.setItem(KEYS.STUDENTS, JSON.stringify(students));
+    saveStudentsToFirebase(students).catch(handleSyncCatch);
+  }
+
+  // --- ATTENDANCE ---
+  public static getAttendance(): AttendanceRecord[] {
+    this.initialize();
+    try {
+      return JSON.parse(localStorage.getItem(KEYS.ATTENDANCE) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveAttendance(attendance: AttendanceRecord[]) {
+    localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(attendance));
+    saveAttendanceToFirebase(attendance).catch(handleSyncCatch);
+  }
+
+  // --- SESSION ---
+  public static getSession(): UserSession | null {
+    try {
+      const session = localStorage.getItem(KEYS.SESSION);
+      return session ? JSON.parse(session) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  public static saveSession(session: UserSession | null) {
+    if (session) {
+      localStorage.setItem(KEYS.SESSION, JSON.stringify(session));
+      localStorage.removeItem('sma_logged_out');
+    } else {
+      localStorage.removeItem(KEYS.SESSION);
+      localStorage.setItem('sma_logged_out', 'true');
+    }
+  }
+
+  // Helper sinh avatar mới
+  public static getNewAvatar(name: string, bgIndex: number): string {
+    return generateAvatar(name, bgIndex);
+  }
+
+  // --- PARENTS ---
+  public static getParents(): ParentAccount[] {
+    this.initialize();
+    try {
+      return JSON.parse(localStorage.getItem(KEYS.PARENTS) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveParents(parents: ParentAccount[]) {
+    localStorage.setItem(KEYS.PARENTS, JSON.stringify(parents));
+    saveParentsToFirebase(parents).catch(handleSyncCatch);
+  }
+
+  // --- WEEKLY MENU ---
+  public static getWeeklyMenu(): WeeklyMenu {
+    this.initialize();
+    try {
+      return JSON.parse(localStorage.getItem(KEYS.WEEKLY_MENU) || 'null') || DEFAULT_WEEKLY_MENU;
+    } catch {
+      return DEFAULT_WEEKLY_MENU;
+    }
+  }
+
+  public static saveWeeklyMenu(weeklyMenu: WeeklyMenu) {
+    localStorage.setItem(KEYS.WEEKLY_MENU, JSON.stringify(weeklyMenu));
+    saveWeeklyMenuToFirebase(weeklyMenu).catch(handleSyncCatch);
+  }
+
+  // --- ABSENCE REPORTS ---
+  public static getAbsenceReports(): AbsenceReport[] {
+    this.initialize();
+    try {
+      return JSON.parse(localStorage.getItem(KEYS.ABSENCE_REPORTS) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveAbsenceReports(reports: AbsenceReport[]) {
+    localStorage.setItem(KEYS.ABSENCE_REPORTS, JSON.stringify(reports));
+    saveAbsenceReportsToFirebase(reports).catch(handleSyncCatch);
+  }
+
+  // --- HEALTH RECORDS ---
+  public static getHealthRecords(): HealthRecord[] {
+    this.initialize();
+    try {
+      const records = JSON.parse(localStorage.getItem(KEYS.HEALTH_RECORDS) || '[]');
+      const students = this.getStudents();
+      return records.map((r: HealthRecord) => {
+        const student = students.find(s => s.id === r.studentId);
+        return {
+          ...r,
+          studentName: student ? student.fullName : r.studentName,
+          className: student ? student.className : r.className,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveHealthRecords(records: HealthRecord[]) {
+    localStorage.setItem(KEYS.HEALTH_RECORDS, JSON.stringify(records));
+  }
+
+  // --- DAILY ASSESSMENTS ---
+  public static getDailyAssessments(): DailyAssessment[] {
+    this.initialize();
+    try {
+      const records = JSON.parse(localStorage.getItem(KEYS.DAILY_ASSESSMENTS) || '[]');
+      const students = this.getStudents();
+      return records.map((r: DailyAssessment) => {
+        const student = students.find(s => s.id === r.studentId);
+        return {
+          ...r,
+          studentName: student ? student.fullName : r.studentName,
+          className: student ? student.className : r.className,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveDailyAssessments(records: DailyAssessment[]) {
+    localStorage.setItem(KEYS.DAILY_ASSESSMENTS, JSON.stringify(records));
+  }
+
+  // --- TEACHER NOTIFICATIONS ---
+  public static getTeacherNotifications(): TeacherNotification[] {
+    this.initialize();
+    try {
+      return JSON.parse(localStorage.getItem(KEYS.TEACHER_NOTIFICATIONS) || '[]');
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveTeacherNotifications(notifications: TeacherNotification[]) {
+    localStorage.setItem(KEYS.TEACHER_NOTIFICATIONS, JSON.stringify(notifications));
+  }
+}

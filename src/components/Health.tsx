@@ -1,0 +1,874 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useMemo } from 'react';
+import {
+  Heart,
+  Search,
+  Filter,
+  Plus,
+  Edit,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  Scale,
+  Activity,
+  Check,
+  AlertTriangle,
+  Info,
+  Calendar,
+  Layers,
+  FileText,
+  Printer
+} from 'lucide-react';
+import { Student, Classroom, SchoolSettings, HealthRecord } from '../types';
+import { StorageService } from '../utils/storage';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
+
+interface HealthProps {
+  students: Student[];
+  classrooms: Classroom[];
+  settings: SchoolSettings;
+}
+
+export default function Health({ students, classrooms, settings }: HealthProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [classFilter, setClassFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+
+  // Load health records from storage
+  const [healthRecords, setHealthRecords] = useState<HealthRecord[]>(() => 
+    StorageService.getHealthRecords()
+  );
+
+  // Modal State
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+
+  // Form Fields
+  const [height, setHeight] = useState<string>('');
+  const [weight, setWeight] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
+  const [date, setDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [formError, setFormError] = useState('');
+  const [formSuccess, setFormSuccess] = useState('');
+
+  // Calculate age in months helper
+  const calculateMonthsOfAge = (dobString: string): number => {
+    if (!dobString) return 0;
+    const dob = new Date(dobString);
+    if (isNaN(dob.getTime())) return 0;
+    
+    // Use current local time or 2026-07-08 from system metadata to match scenario timeline
+    const now = new Date('2026-07-08');
+    const yearsDiff = now.getFullYear() - dob.getFullYear();
+    const monthsDiff = now.getMonth() - dob.getMonth();
+    const totalMonths = (yearsDiff * 12) + monthsDiff;
+    return totalMonths >= 0 ? totalMonths : 0;
+  };
+
+  // BMI status assessment helper
+  const evaluateBMI = (bmi: number, ageInMonths: number) => {
+    if (ageInMonths < 60) {
+      return {
+        status: 'Trẻ dưới 60 tháng tuổi',
+        colorClass: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700',
+        textColor: 'text-slate-500 dark:text-slate-400',
+        bgColor: 'bg-slate-50 dark:bg-slate-850',
+        description: 'Đang theo dõi tăng trưởng theo biểu đồ chuẩn mầm non của WHO (không xếp loại BMI).'
+      };
+    }
+
+    if (bmi < 14) {
+      return {
+        status: 'Suy dinh dưỡng',
+        colorClass: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20',
+        textColor: 'text-rose-600 dark:text-rose-400',
+        bgColor: 'bg-rose-50 dark:bg-rose-950/20',
+        description: 'Thể trạng thiếu cân, còi cọc. Cần bổ sung thêm dưỡng chất và bữa phụ.'
+      };
+    } else if (bmi >= 14 && bmi < 18.5) {
+      return {
+        status: 'Bình thường',
+        colorClass: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20',
+        textColor: 'text-emerald-600 dark:text-emerald-400',
+        bgColor: 'bg-emerald-50 dark:bg-emerald-950/20',
+        description: 'Chỉ số thể chất tuyệt vời! Bé phát triển cân đối và khỏe mạnh.'
+      };
+    } else if (bmi >= 18.5 && bmi < 23) {
+      return {
+        status: 'Dư cân',
+        colorClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20',
+        textColor: 'text-amber-600 dark:text-amber-400',
+        bgColor: 'bg-amber-50 dark:bg-amber-950/20',
+        description: 'Có xu hướng dư cân nhẹ. Nên điều chỉnh chế độ ăn uống và tăng vận động.'
+      };
+    } else {
+      return {
+        status: 'Béo phì',
+        colorClass: 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20',
+        textColor: 'text-red-600 dark:text-red-400',
+        bgColor: 'bg-red-50 dark:bg-red-950/20',
+        description: 'Chỉ số BMI ở mức báo động béo phì. Cần tư vấn y tế dinh dưỡng và kiểm soát tinh bột.'
+      };
+    }
+  };
+
+  // Map students to their latest health records
+  const studentHealthList = useMemo(() => {
+    return students.map(student => {
+      // Find latest record for this student
+      const studentRecords = healthRecords
+        .filter(r => r.studentId === student.id)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      const latestRecord = studentRecords[0];
+      const ageInMonths = calculateMonthsOfAge(student.dateOfBirth);
+
+      return {
+        student,
+        ageInMonths,
+        latestRecord,
+        history: studentRecords
+      };
+    });
+  }, [students, healthRecords]);
+
+  // Filters & Search
+  const filteredList = useMemo(() => {
+    return studentHealthList.filter(item => {
+      const matchSearch = item.student.fullName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          item.student.studentCode.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchClass = classFilter === 'all' || item.student.classId === classFilter;
+      return matchSearch && matchClass;
+    });
+  }, [studentHealthList, searchTerm, classFilter]);
+
+  // Statistics
+  const stats = useMemo(() => {
+    let measuredCount = 0;
+    let normal = 0;
+    let malnourished = 0;
+    let overweight = 0;
+    let obese = 0;
+    let under60Months = 0;
+
+    studentHealthList.forEach(item => {
+      if (item.latestRecord) {
+        measuredCount++;
+        if (item.ageInMonths < 60) {
+          under60Months++;
+        } else {
+          const bmi = item.latestRecord.bmi || 0;
+          const evaluation = evaluateBMI(bmi, item.ageInMonths);
+          if (evaluation.status === 'Bình thường') normal++;
+          else if (evaluation.status === 'Suy dinh dưỡng') malnourished++;
+          else if (evaluation.status === 'Dư cân') overweight++;
+          else if (evaluation.status === 'Béo phì') obese++;
+        }
+      }
+    });
+
+    return {
+      total: studentHealthList.length,
+      measured: measuredCount,
+      unmeasured: studentHealthList.length - measuredCount,
+      normal,
+      malnourished,
+      overweight,
+      obese,
+      under60Months
+    };
+  }, [studentHealthList]);
+
+  // Calculate average height and weight per month for selected classroom (or all)
+  const chartData = useMemo(() => {
+    const filteredRecords = healthRecords.filter(record => {
+      if (classFilter !== 'all' && record.classId !== classFilter) {
+        return false;
+      }
+      return true;
+    });
+
+    const monthlyGroups: { [key: string]: { totalHeight: number; totalWeight: number; count: number } } = {};
+
+    filteredRecords.forEach(r => {
+      const dateStr = r.date;
+      if (!dateStr) return;
+      const monthKey = dateStr.substring(0, 7); // e.g., "2026-06"
+      if (!monthlyGroups[monthKey]) {
+        monthlyGroups[monthKey] = { totalHeight: 0, totalWeight: 0, count: 0 };
+      }
+      monthlyGroups[monthKey].totalHeight += r.height;
+      monthlyGroups[monthKey].totalWeight += r.weight;
+      monthlyGroups[monthKey].count += 1;
+    });
+
+    return Object.entries(monthlyGroups)
+      .map(([monthKey, data]) => {
+        const [year, month] = monthKey.split('-');
+        return {
+          monthKey,
+          name: `Tháng ${month}/${year}`,
+          'Chiều cao (cm)': Math.round((data.totalHeight / data.count) * 10) / 10,
+          'Cân nặng (kg)': Math.round((data.totalWeight / data.count) * 10) / 10,
+        };
+      })
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  }, [healthRecords, classFilter]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredList.length / itemsPerPage);
+  const paginatedList = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredList.slice(start, start + itemsPerPage);
+  }, [filteredList, currentPage]);
+
+  const handleOpenUpdateModal = (student: Student, latestRecord?: HealthRecord) => {
+    setSelectedStudent(student);
+    if (latestRecord) {
+      setHeight(latestRecord.height.toString());
+      setWeight(latestRecord.weight.toString());
+      setNotes(latestRecord.notes || '');
+      setDate(latestRecord.date);
+    } else {
+      setHeight('');
+      setWeight('');
+      setNotes('');
+      setDate(new Date().toISOString().split('T')[0]);
+    }
+    setFormError('');
+    setFormSuccess('');
+    setIsUpdateModalOpen(true);
+  };
+
+  const handleSaveHealthRecord = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent) return;
+
+    const hVal = parseFloat(height);
+    const wVal = parseFloat(weight);
+
+    if (isNaN(hVal) || hVal <= 0) {
+      setFormError('Vui lòng nhập chiều cao hợp lệ (cm).');
+      return;
+    }
+    if (isNaN(wVal) || wVal <= 0) {
+      setFormError('Vui lòng nhập cân nặng hợp lệ (kg).');
+      return;
+    }
+    if (!date) {
+      setFormError('Vui lòng chọn ngày đo.');
+      return;
+    }
+
+    const ageInMonths = calculateMonthsOfAge(selectedStudent.dateOfBirth);
+    const heightInMeters = hVal / 100;
+    const bmiVal = Math.round((wVal / (heightInMeters * heightInMeters)) * 100) / 100;
+    const evaluation = evaluateBMI(bmiVal, ageInMonths);
+
+    // Create new health record
+    const newRecord: HealthRecord = {
+      id: `hr_${Date.now()}`,
+      studentId: selectedStudent.id,
+      studentName: selectedStudent.fullName,
+      classId: selectedStudent.classId,
+      date,
+      height: hVal,
+      weight: wVal,
+      bmi: ageInMonths >= 60 ? bmiVal : undefined,
+      status: evaluation.status,
+      notes: notes.trim()
+    };
+
+    // Filter out previous record of same date to avoid duplicates on same day, then insert new
+    const cleanRecords = healthRecords.filter(r => !(r.studentId === selectedStudent.id && r.date === date));
+    const updatedRecords = [newRecord, ...cleanRecords];
+
+    setHealthRecords(updatedRecords);
+    StorageService.saveHealthRecords(updatedRecords);
+
+    setFormSuccess(`Đã lưu chỉ số sức khỏe thành công cho bé ${selectedStudent.fullName}!`);
+    setTimeout(() => {
+      setIsUpdateModalOpen(false);
+      setSelectedStudent(null);
+    }, 1200);
+  };
+
+  // Real-time BMI calculation in modal for user preview
+  const livePreview = useMemo(() => {
+    if (!selectedStudent) return null;
+    const hVal = parseFloat(height);
+    const wVal = parseFloat(weight);
+    if (isNaN(hVal) || hVal <= 0 || isNaN(wVal) || wVal <= 0) return null;
+
+    const ageInMonths = calculateMonthsOfAge(selectedStudent.dateOfBirth);
+    const hMeters = hVal / 100;
+    const bmiVal = Math.round((wVal / (hMeters * hMeters)) * 100) / 100;
+    const evalResult = evaluateBMI(bmiVal, ageInMonths);
+
+    return {
+      bmi: bmiVal,
+      ageInMonths,
+      ...evalResult
+    };
+  }, [selectedStudent, height, weight]);
+
+  // Color theme logic mapping
+  const getThemeAccentColor = () => {
+    switch (settings.themeColor) {
+      case 'emerald': return 'emerald';
+      case 'violet': return 'violet';
+      case 'rose': return 'rose';
+      case 'amber': return 'amber';
+      default: return 'blue';
+    }
+  };
+
+  const accentColor = getThemeAccentColor();
+
+  return (
+    <div className="space-y-6 text-slate-800 dark:text-slate-100">
+      
+      {/* HEADER SECTION */}
+      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+            Quản Lý Sức Khỏe Học Sinh <Heart size={24} className={`text-${accentColor}-500 fill-${accentColor}-500/10 shrink-0`} />
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            Theo dõi, cập nhật định kỳ chiều cao, cân nặng và tự động tính toán chỉ số khối cơ thể (BMI) của học sinh để đánh giá tình trạng thể chất theo tiêu chuẩn của WHO.
+          </p>
+        </div>
+
+        {/* Actions Row */}
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0 no-print">
+          <button
+            onClick={() => window.print()}
+            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all transform hover:-translate-y-0.5 cursor-pointer shrink-0"
+          >
+            <Printer size={15} />
+            <span>In báo cáo</span>
+          </button>
+
+          {/* Informative helper badge */}
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-150 dark:border-slate-800 text-xs text-slate-500 shrink-0">
+            <Info size={15} className={`text-${accentColor}-500`} />
+            <span>BMI đánh giá cho bé <strong>đủ 60 tháng tuổi trở lên</strong></span>
+          </div>
+        </div>
+      </div>
+
+      {/* STATS BENTO TILES */}
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+        {/* Total measured */}
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs flex items-center gap-4.5 col-span-2">
+          <div className={`w-12 h-12 rounded-xl bg-${accentColor}-500/10 flex items-center justify-center text-${accentColor}-600 dark:text-${accentColor}-400 shrink-0`}>
+            <Scale size={24} className="stroke-1.5" />
+          </div>
+          <div>
+            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Đã đo chỉ số</span>
+            <div className="flex items-baseline gap-1.5 mt-0.5">
+              <span className="text-xl font-black text-slate-900 dark:text-white">{stats.measured}</span>
+              <span className="text-[10px] font-medium text-slate-400">/ {stats.total} học sinh</span>
+            </div>
+            <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div 
+                className={`bg-${accentColor}-500 h-1.5 rounded-full`} 
+                style={{ width: `${(stats.measured / (stats.total || 1)) * 100}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Normal */}
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs">
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bình thường</span>
+          <span className="block text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">{stats.normal}</span>
+          <span className="text-[10px] text-slate-400 mt-1 block">Tỷ lệ: {stats.measured > 0 ? Math.round((stats.normal / stats.measured) * 100) : 0}%</span>
+        </div>
+
+        {/* Malnourished */}
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs">
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider text-rose-500">Suy dinh dưỡng</span>
+          <span className="block text-2xl font-black text-rose-600 dark:text-rose-400 mt-1">{stats.malnourished}</span>
+          <span className="text-[10px] text-slate-400 mt-1 block">Cần bổ sung chất</span>
+        </div>
+
+        {/* Overweight & Obese */}
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs">
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider text-amber-500">Dư cân / Béo phì</span>
+          <span className="block text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">
+            {stats.overweight + stats.obese}
+          </span>
+          <span className="text-[10px] text-slate-400 mt-1 block">({stats.overweight} dư cân, {stats.obese} béo phì)</span>
+        </div>
+
+        {/* Under 60 Months */}
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs">
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dưới 60 tháng</span>
+          <span className="block text-2xl font-black text-slate-500 dark:text-slate-400 mt-1">{stats.under60Months}</span>
+          <span className="text-[10px] text-slate-400 mt-1 block">Đo biểu đồ WHO</span>
+        </div>
+      </div>
+
+      {/* HEALTH TRENDS CHART */}
+      <div className="no-print bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-xs space-y-4">
+        <div>
+          <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <Activity size={18} className={`text-${accentColor}-500`} />
+            Xu Hướng Phát Triển Chiều Cao & Cân Nặng Trung Bình Theo Tháng
+          </h3>
+          <p className="text-[11px] text-slate-400 mt-1">
+            {classFilter === 'all' 
+              ? 'Thống kê trung bình của tất cả học sinh trong trường qua từng đợt kiểm tra sức khỏe.'
+              : `Thống kê trung bình của học sinh thuộc lớp đang chọn.`}
+          </p>
+        </div>
+
+        {chartData.length === 0 ? (
+          <div className="h-64 flex flex-col items-center justify-center text-slate-400 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-dashed border-slate-250 dark:border-slate-800">
+            <Activity size={32} className="text-slate-300 animate-pulse mb-2" />
+            <p className="text-xs font-bold text-slate-500">Chưa có dữ liệu biểu đồ</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Vui lòng cập nhật chỉ số đo cho học sinh trước.</p>
+          </div>
+        ) : (
+          <div className="h-80 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={chartData}
+                margin={{ top: 10, right: 10, left: -15, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" className="dark:hidden" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" className="hidden dark:block" />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 500 }}
+                  axisLine={{ stroke: '#e2e8f0' }}
+                  tickLine={false}
+                />
+                <YAxis 
+                  yAxisId="left"
+                  tick={{ fill: '#f43f5e', fontSize: 10, fontWeight: 500 }}
+                  label={{ value: 'Chiều cao (cm)', angle: -90, position: 'insideLeft', offset: 10, style: { textAnchor: 'middle', fill: '#f43f5e', fontSize: 10, fontWeight: 'bold' } }}
+                  domain={['dataMin - 5', 'dataMax + 5']}
+                  axisLine={{ stroke: '#fda4af' }}
+                  tickLine={false}
+                />
+                <YAxis 
+                  yAxisId="right"
+                  orientation="right"
+                  tick={{ fill: '#3b82f6', fontSize: 10, fontWeight: 500 }}
+                  label={{ value: 'Cân nặng (kg)', angle: 90, position: 'insideRight', offset: 10, style: { textAnchor: 'middle', fill: '#3b82f6', fontSize: 10, fontWeight: 'bold' } }}
+                  domain={['dataMin - 2', 'dataMax + 2']}
+                  axisLine={{ stroke: '#93c5fd' }}
+                  tickLine={false}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#1e293b', 
+                    borderRadius: '12px', 
+                    border: 'none', 
+                    color: '#f8fafc',
+                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                    fontSize: '11px',
+                  }}
+                  itemStyle={{ color: '#f8fafc' }}
+                  labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '4px' }}
+                />
+                <Bar 
+                  yAxisId="left" 
+                  dataKey="Chiều cao (cm)" 
+                  fill="#f43f5e" 
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={32}
+                />
+                <Bar 
+                  yAxisId="right" 
+                  dataKey="Cân nặng (kg)" 
+                  fill="#3b82f6" 
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={32}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* SEARCH AND FILTERS */}
+      <div className="no-print bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Tìm kiếm theo mã học sinh hoặc tên..."
+            value={searchTerm}
+            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl text-xs border border-transparent focus:border-slate-200 dark:focus:border-slate-800 outline-hidden transition"
+          />
+        </div>
+
+        <div className="flex gap-2 shrink-0">
+          <div className="relative flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-200/50 dark:border-slate-800/80 rounded-xl text-xs">
+            <Filter size={14} className="text-slate-400" />
+            <span className="text-slate-500">Lớp:</span>
+            <select
+              value={classFilter}
+              onChange={(e) => { setClassFilter(e.target.value); setCurrentPage(1); }}
+              className="bg-transparent font-bold text-slate-700 dark:text-slate-200 outline-hidden cursor-pointer"
+            >
+              <option value="all" className="bg-white dark:bg-slate-900">Tất cả lớp</option>
+              {classrooms.map(c => (
+                <option key={c.id} value={c.id} className="bg-white dark:bg-slate-900">{c.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* STUDENTS HEALTH TABLE */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-850/50 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                <th className="px-6 py-4">Mã HS / Họ & Tên</th>
+                <th className="px-6 py-4">Lớp</th>
+                <th className="px-6 py-4">Tháng Tuổi</th>
+                <th className="px-6 py-4 text-center">Chiều Cao</th>
+                <th className="px-6 py-4 text-center">Cân Nặng</th>
+                <th className="px-6 py-4 text-center">BMI</th>
+                <th className="px-6 py-4">Trạng Thái Thể Chất</th>
+                <th className="px-6 py-4">Ngày Đo Gần Nhất</th>
+                <th className="px-6 py-4 text-right no-print">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs">
+              {paginatedList.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400 space-y-2">
+                    <Activity size={32} className="mx-auto text-slate-300 stroke-1" />
+                    <p className="font-bold text-slate-500">Không tìm thấy học sinh nào</p>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                      Hãy thử thay đổi từ khóa tìm kiếm hoặc bộ lọc lớp học của bạn.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                paginatedList.map(({ student, ageInMonths, latestRecord }) => {
+                  const hasRecord = !!latestRecord;
+                  const evaluation = hasRecord ? evaluateBMI(latestRecord.bmi || 0, ageInMonths) : null;
+
+                  return (
+                    <tr 
+                      key={student.id} 
+                      className="hover:bg-slate-50/50 dark:hover:bg-slate-850/20 transition-all duration-150"
+                    >
+                      {/* Full name and code */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <img 
+                            src={student.avatar} 
+                            alt={student.fullName} 
+                            className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 shrink-0" 
+                            referrerPolicy="no-referrer"
+                          />
+                          <div>
+                            <strong className="text-slate-850 dark:text-slate-150 block">{student.fullName}</strong>
+                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">{student.studentCode}</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Classroom */}
+                      <td className="px-6 py-4 text-slate-500 font-bold">
+                        {student.className}
+                      </td>
+
+                      {/* Age in Months */}
+                      <td className="px-6 py-4 text-slate-500">
+                        <span className="font-bold text-slate-800 dark:text-slate-200">{ageInMonths}</span> tháng
+                        <span className="block text-[10px] text-slate-400">({student.dateOfBirth})</span>
+                      </td>
+
+                      {/* Height */}
+                      <td className="px-6 py-4 text-center font-mono">
+                        {hasRecord ? (
+                          <span className="text-slate-800 dark:text-slate-200 font-bold">{latestRecord.height} <span className="text-[10px] text-slate-400">cm</span></span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-700 italic font-medium">Chưa đo</span>
+                        )}
+                      </td>
+
+                      {/* Weight */}
+                      <td className="px-6 py-4 text-center font-mono">
+                        {hasRecord ? (
+                          <span className="text-slate-800 dark:text-slate-200 font-bold">{latestRecord.weight} <span className="text-[10px] text-slate-400">kg</span></span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-700 italic font-medium">Chưa đo</span>
+                        )}
+                      </td>
+
+                      {/* BMI */}
+                      <td className="px-6 py-4 text-center font-mono">
+                        {hasRecord && latestRecord.bmi ? (
+                          <span className="text-slate-900 dark:text-white font-extrabold text-sm">{latestRecord.bmi}</span>
+                        ) : hasRecord ? (
+                          <span className="text-slate-400 text-[10px]" title="Không tính BMI cho trẻ dưới 60 tháng">N/A</span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-700 italic font-medium">Chưa đo</span>
+                        )}
+                      </td>
+
+                      {/* BMI Status badge */}
+                      <td className="px-6 py-4">
+                        {hasRecord && evaluation ? (
+                          <span className={`px-2.5 py-1 rounded-md font-extrabold text-[10px] uppercase ${evaluation.colorClass}`}>
+                            {evaluation.status}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic font-medium text-[11px]">Chưa cập nhật chỉ số</span>
+                        )}
+                      </td>
+
+                      {/* Date of record */}
+                      <td className="px-6 py-4 text-slate-400 font-medium font-mono text-[11px]">
+                        {hasRecord ? latestRecord.date : '--'}
+                      </td>
+
+                      {/* Action trigger */}
+                      <td className="px-6 py-4 text-right no-print">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenUpdateModal(student, latestRecord)}
+                          className={`px-3 py-1.5 bg-${accentColor}-500/10 hover:bg-${accentColor}-500/20 text-${accentColor}-600 dark:text-${accentColor}-400 rounded-xl font-bold transition flex items-center gap-1 ml-auto cursor-pointer text-[11px]`}
+                        >
+                          <Edit size={12} />
+                          <span>{hasRecord ? 'Cập nhật' : 'Nhập số đo'}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* PAGINATION ZONE */}
+        {totalPages > 1 && (
+          <div className="no-print p-4 border-t border-slate-150 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-medium">
+              Đang hiển thị {paginatedList.length} trên tổng số {filteredList.length} học sinh
+            </span>
+            <div className="flex gap-2">
+              <button
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-850 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-400 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              {Array.from({ length: totalPages }).map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentPage(idx + 1)}
+                  className={`w-8 h-8 rounded-lg text-xs font-bold cursor-pointer transition ${
+                    currentPage === idx + 1
+                      ? `bg-${accentColor}-600 text-white`
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100 dark:bg-slate-850 dark:text-slate-400 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {idx + 1}
+                </button>
+              ))}
+              <button
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-850 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-400 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* UPDATE MODAL DIALOG */}
+      {isUpdateModalOpen && selectedStudent && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" 
+            onClick={() => setIsUpdateModalOpen(false)} 
+          />
+          
+          <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 relative z-[110] shadow-2xl overflow-hidden animate-scale-in text-slate-800 dark:text-slate-100">
+            
+            {/* Modal Header */}
+            <div className={`p-6 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-850/30 flex items-center justify-between`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full bg-${accentColor}-500/10 flex items-center justify-center text-${accentColor}-600 dark:text-${accentColor}-400 shrink-0`}>
+                  <Scale size={20} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 dark:text-white">Cập Nhật Chỉ Số Sức Khỏe</h3>
+                  <span className="text-[11px] text-slate-400 font-medium">Bé: <strong>{selectedStudent.fullName}</strong> • Lớp: {selectedStudent.className}</span>
+                </div>
+              </div>
+              
+              <button 
+                onClick={() => setIsUpdateModalOpen(false)} 
+                className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-full transition cursor-pointer"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
+            <form onSubmit={handleSaveHealthRecord} className="p-6 space-y-4">
+              
+              {formError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-2">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              {formSuccess && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center gap-2">
+                  <Check size={14} className="shrink-0" />
+                  <span>{formSuccess}</span>
+                </div>
+              )}
+
+              {/* Grid 2-column input */}
+              <div className="grid grid-cols-2 gap-4">
+                
+                {/* Height input */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Chiều Cao (cm) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="Ví dụ: 105.5"
+                    value={height}
+                    onChange={(e) => setHeight(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl text-xs font-bold text-black border border-slate-200/60 dark:border-slate-800 outline-hidden focus:border-slate-300 dark:focus:border-slate-700 transition"
+                  />
+                </div>
+
+                {/* Weight input */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Cân Nặng (kg) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="Ví dụ: 18.2"
+                    value={weight}
+                    onChange={(e) => setWeight(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl text-xs font-bold text-black border border-slate-200/60 dark:border-slate-800 outline-hidden focus:border-slate-300 dark:focus:border-slate-700 transition"
+                  />
+                </div>
+
+              </div>
+
+              {/* Date & Note input */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Ngày Đo <span className="text-red-500">*</span></label>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl text-xs font-bold text-black border border-slate-200/60 dark:border-slate-800 outline-hidden focus:border-slate-300 dark:focus:border-slate-700 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">Ghi Chú</label>
+                  <input
+                    type="text"
+                    placeholder="Ghi nhận thêm sức khỏe..."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl text-xs font-bold text-black border border-slate-200/60 dark:border-slate-800 outline-hidden focus:border-slate-300 dark:focus:border-slate-700 transition"
+                  />
+                </div>
+              </div>
+
+              {/* LIVE BMI COMPUTATION PREVIEW */}
+              {livePreview ? (
+                <div className={`p-4 rounded-2xl ${livePreview.bgColor} border border-slate-150 dark:border-slate-800 text-xs space-y-2.5 animate-fade-in`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="block text-[10px] font-bold text-slate-400 uppercase">Ước tính BMI</span>
+                      <strong className={`text-base font-black ${livePreview.textColor} font-mono`}>
+                        {livePreview.bmi}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] font-bold text-slate-400 uppercase text-right">Phân loại thể chất</span>
+                      <span className={`inline-block px-2.5 py-0.5 rounded-md font-extrabold text-[10px] uppercase mt-0.5 ${livePreview.colorClass}`}>
+                        {livePreview.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed font-medium">
+                    {livePreview.description}
+                  </p>
+
+                  <div className="flex gap-1.5 items-center bg-white dark:bg-slate-900/60 px-3 py-2 rounded-xl text-[10px] text-slate-400">
+                    <Calendar size={12} className="text-slate-400" />
+                    <span>Học sinh hiện tại: <strong>{livePreview.ageInMonths} tháng tuổi</strong> (Được xếp loại BMI từ đủ 60 tháng tuổi)</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-slate-50 dark:bg-slate-850/50 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400 font-medium py-6">
+                  Hãy nhập Chiều Cao & Cân Nặng để xem trước tính toán BMI tức thời của bé.
+                </div>
+              )}
+
+              {/* Submit / Action Zone */}
+              <div className="flex gap-3 justify-end pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsUpdateModalOpen(false)}
+                  className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  className={`py-2.5 px-5 bg-${accentColor}-600 hover:bg-${accentColor}-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm`}
+                >
+                  <Check size={14} />
+                  <span>Lưu chỉ số</span>
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
