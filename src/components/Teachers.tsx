@@ -181,7 +181,7 @@ export default function Teachers({
     setDialogMode('add');
     setFormName('');
     setFormPhone('');
-    setFormPassword('123');
+    setFormPassword('54321');
     setFormDob('');
     setFormAddress('');
     setFormHometown('');
@@ -658,7 +658,7 @@ export default function Teachers({
           cleanPhone = `09${Math.floor(Math.random() * 90000000 + 10000000)}`;
         }
 
-        const tPassword = passwordIdx !== -1 && columns[passwordIdx] ? columns[passwordIdx] : '123';
+        const tPassword = passwordIdx !== -1 && columns[passwordIdx] ? columns[passwordIdx] : '54321';
 
         const rawGender = genderIdx !== -1 && columns[genderIdx] ? columns[genderIdx].toLowerCase() : '';
         const tGender: Gender = (rawGender.includes('nữ') || rawGender.includes('female') || rawGender === 'nu') ? 'Nữ' : 'Nam';
@@ -1278,7 +1278,7 @@ export default function Teachers({
                         placeholder="Mật khẩu đăng nhập cổng giáo viên"
                         className={`w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm outline-none transition ${getThemeFocusClass()}`}
                       />
-                      <p className="text-[10px] text-slate-400 mt-1 ml-0.5">Mật khẩu để giáo viên tự đăng nhập hệ thống. Mặc định là: 123</p>
+                      <p className="text-[10px] text-slate-400 mt-1 ml-0.5">Mật khẩu để giáo viên tự đăng nhập hệ thống. Mặc định là: 54321</p>
                     </div>
 
                     {/* CCCD */}

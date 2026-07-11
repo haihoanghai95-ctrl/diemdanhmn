@@ -25,10 +25,15 @@ import {
   Check,
   AlertTriangle,
   Copy,
-  ExternalLink
+  ExternalLink,
+  BookOpen,
+  Sparkles,
+  DollarSign,
+  Calendar,
+  Trash2
 } from 'lucide-react';
 
-import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, AbsenceReport, TeacherAccount, WeeklyMenu } from './types';
+import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, AbsenceReport, TeacherAccount, WeeklyMenu, TeacherNotification } from './types';
 import { StorageService } from './utils/storage';
 import { syncOnMount } from './utils/firebaseSync';
 
@@ -47,6 +52,7 @@ import AttendanceHistory from './components/AttendanceHistory';
 import Reports from './components/Reports';
 import MenuPosting from './components/MenuPosting';
 import SettingsComponent from './components/Settings';
+import DailyAssessments from './components/DailyAssessments';
 
 export default function App() {
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'synced' | 'error'>('syncing');
@@ -64,7 +70,9 @@ export default function App() {
 
   // Absence Reports and Notifications states
   const [absenceReports, setAbsenceReports] = useState<AbsenceReport[]>(() => StorageService.getAbsenceReports());
+  const [teacherNotifications, setTeacherNotifications] = useState<TeacherNotification[]>(() => StorageService.getTeacherNotifications());
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
+  const [notifTab, setNotifTab] = useState<'absence' | 'other'>('absence');
 
   // Reusable Firebase and LocalStorage Sync logic
   const runFirebaseSync = async () => {
@@ -137,7 +145,7 @@ export default function App() {
 
     if (session?.isTeacher) {
       const allClassrooms = StorageService.getClassrooms();
-      const otherClassrooms = allClassrooms.filter(c => c.createdBy !== session.teacherPhone);
+      const otherClassrooms = allClassrooms.filter(c => c.createdBy !== session.teacherPhone && !c.coTeachers?.includes(session.teacherPhone!));
       const newAllClassrooms = [...otherClassrooms, ...preparedClassrooms];
       StorageService.saveClassrooms(newAllClassrooms);
       setClassrooms(newAllClassrooms);
@@ -152,7 +160,7 @@ export default function App() {
   const handleSaveStudents = (newStudents: Student[]) => {
     if (session?.isTeacher) {
       const allStudents = StorageService.getStudents();
-      const teacherClassIds = classrooms.filter(c => c.createdBy === session.teacherPhone).map(c => c.id);
+      const teacherClassIds = classrooms.filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!)).map(c => c.id);
       const otherStudents = allStudents.filter(s => !teacherClassIds.includes(s.classId));
       const newAllStudents = [...otherStudents, ...newStudents];
       StorageService.saveStudents(newAllStudents);
@@ -173,7 +181,7 @@ export default function App() {
   const handleSaveAttendance = (newAttendance: AttendanceRecord[]) => {
     if (session?.isTeacher) {
       const allAttendance = StorageService.getAttendance();
-      const teacherClassIds = classrooms.filter(c => c.createdBy === session.teacherPhone).map(c => c.id);
+      const teacherClassIds = classrooms.filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!)).map(c => c.id);
       const otherAttendance = allAttendance.filter(a => !teacherClassIds.includes(a.classId));
       const newAllAttendance = [...otherAttendance, ...newAttendance];
       StorageService.saveAttendance(newAllAttendance);
@@ -233,6 +241,24 @@ export default function App() {
     StorageService.saveAbsenceReports(updated);
   };
 
+  const handleMarkNotifAsReadInApp = (id: string) => {
+    const updated = teacherNotifications.map(n => n.id === id ? { ...n, isRead: true, read: true } : n);
+    setTeacherNotifications(updated);
+    StorageService.saveTeacherNotifications(updated);
+  };
+
+  const handleMarkAllNotifsAsReadInApp = () => {
+    const updated = teacherNotifications.map(n => ({ ...n, isRead: true, read: true }));
+    setTeacherNotifications(updated);
+    StorageService.saveTeacherNotifications(updated);
+  };
+
+  const handleClearAllNotifsInApp = () => {
+    // Keep only read ones, or clear all? The user requested to clear all
+    setTeacherNotifications([]);
+    StorageService.saveTeacherNotifications([]);
+  };
+
   const handleLoginSuccess = (newSession: UserSession) => {
     // 1. Reload local storage values immediately so the states are populated right after login
     StorageService.initialize();
@@ -243,6 +269,7 @@ export default function App() {
     setAttendance(StorageService.getAttendance());
     setWeeklyMenu(StorageService.getWeeklyMenu());
     setAbsenceReports(StorageService.getAbsenceReports());
+    setTeacherNotifications(StorageService.getTeacherNotifications());
 
     // 2. Set the session to transition the screen
     setSession(newSession);
@@ -322,11 +349,11 @@ export default function App() {
 
   // --- COMPUTE TENANT-SPECIFIC DATA LISTS ---
   const teacherClassIds = session?.isTeacher
-    ? classrooms.filter(c => c.createdBy === session.teacherPhone).map(c => c.id)
+    ? classrooms.filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!)).map(c => c.id)
     : [];
 
   const displayedClassrooms = session?.isTeacher
-    ? classrooms.filter(c => c.createdBy === session.teacherPhone)
+    ? classrooms.filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!))
     : classrooms;
 
   const displayedStudents = session?.isTeacher
@@ -359,6 +386,13 @@ export default function App() {
   const displayedAbsenceReports = session?.isTeacher
     ? absenceReports.filter(r => teacherClassIds.includes(r.classId))
     : absenceReports;
+
+  const displayedNotifications = useMemo(() => {
+    if (session?.isTeacher) {
+      return teacherNotifications.filter(n => teacherClassIds.includes(n.classId));
+    }
+    return teacherNotifications;
+  }, [teacherNotifications, session, teacherClassIds]);
 
   // Render Login screen if user session is absent
   if (!session) {
@@ -475,14 +509,19 @@ export default function App() {
             {/* Quick absence reports notifications bell */}
             <div className="relative">
               <button
-                onClick={() => setNotifDropdownOpen(!notifDropdownOpen)}
+                onClick={() => {
+                  if (!notifDropdownOpen) {
+                    setTeacherNotifications(StorageService.getTeacherNotifications());
+                  }
+                  setNotifDropdownOpen(!notifDropdownOpen);
+                }}
                 className="p-2 rounded-full border border-slate-200/60 dark:border-slate-800 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-pointer transition relative flex items-center justify-center"
-                title="Thông báo báo vắng từ phụ huynh"
+                title="Thông báo từ phụ huynh"
               >
                 <Bell size={16} />
-                {displayedAbsenceReports.filter(r => r.status === 'pending').length > 0 && (
+                {(displayedAbsenceReports.filter(r => r.status === 'pending').length + displayedNotifications.filter(n => !n.isRead).length) > 0 && (
                   <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-extrabold w-4.5 h-4.5 rounded-full flex items-center justify-center animate-pulse">
-                    {displayedAbsenceReports.filter(r => r.status === 'pending').length}
+                    {displayedAbsenceReports.filter(r => r.status === 'pending').length + displayedNotifications.filter(n => !n.isRead).length}
                   </span>
                 )}
               </button>
@@ -495,74 +534,209 @@ export default function App() {
                     onClick={() => setNotifDropdownOpen(false)} 
                   />
                   <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-40 overflow-hidden animate-scale-in text-xs text-slate-850 dark:text-slate-100">
-                    <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-850/50">
-                      <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                        <Bell size={14} className="text-rose-500" />
-                        Đơn Báo Vắng Chưa Duyệt ({displayedAbsenceReports.filter(r => r.status === 'pending').length})
-                      </span>
-                      {displayedAbsenceReports.filter(r => r.status === 'pending').length > 0 && (
-                        <span className="text-[10px] bg-rose-500/10 text-rose-500 px-2 py-0.5 rounded-full font-bold animate-pulse">
-                          Mới
+                    <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-sm">
+                          <Bell size={15} className="text-rose-500" />
+                          Thông báo từ Phụ huynh
                         </span>
-                      )}
+                        {notifTab === 'other' && displayedNotifications.length > 0 && (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={handleMarkAllNotifsAsReadInApp}
+                              className="text-[9px] font-extrabold uppercase text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition cursor-pointer"
+                            >
+                              Đọc hết
+                            </button>
+                            <span className="text-slate-200">|</span>
+                            <button
+                              type="button"
+                              onClick={handleClearAllNotifsInApp}
+                              className="text-[9px] font-extrabold uppercase text-rose-500 hover:text-rose-600 transition cursor-pointer"
+                            >
+                              Xóa sạch
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* TABS SWITCHER */}
+                      <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => setNotifTab('absence')}
+                          className={`flex-1 py-1.5 rounded-lg text-center font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer ${
+                            notifTab === 'absence'
+                              ? 'bg-white dark:bg-slate-900 shadow-2xs text-slate-900 dark:text-white'
+                              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          <span>Đơn báo vắng</span>
+                          {displayedAbsenceReports.filter(r => r.status === 'pending').length > 0 && (
+                            <span className="bg-red-500 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-full">
+                              {displayedAbsenceReports.filter(r => r.status === 'pending').length}
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNotifTab('other')}
+                          className={`flex-1 py-1.5 rounded-lg text-center font-extrabold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer ${
+                            notifTab === 'other'
+                              ? 'bg-white dark:bg-slate-900 shadow-2xs text-slate-900 dark:text-white'
+                              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          <span>Tương tác khác</span>
+                          {displayedNotifications.filter(n => !n.isRead).length > 0 && (
+                            <span className="bg-emerald-500 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-full">
+                              {displayedNotifications.filter(n => !n.isRead).length}
+                            </span>
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-                      {displayedAbsenceReports.filter(r => r.status === 'pending').length === 0 ? (
-                        <div className="p-8 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
-                          <Check size={28} className="text-emerald-500 bg-emerald-500/10 p-1.5 rounded-full" />
-                          <p className="font-bold text-slate-700 dark:text-slate-300">Không có đơn báo vắng chưa duyệt.</p>
-                          <p className="text-[10px] text-slate-400">Các đơn xin nghỉ đã được xử lý xong.</p>
-                        </div>
-                      ) : (
-                        displayedAbsenceReports.filter(r => r.status === 'pending').map((report) => (
-                          <div key={report.id} className="p-4 space-y-2.5 hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <h4 className="font-bold text-slate-850 dark:text-slate-100">
-                                  {report.studentName} <span className="font-normal text-slate-400">({report.className})</span>
-                                </h4>
-                                <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                  Nghỉ: <span className="font-bold text-slate-600 dark:text-slate-300">{report.startDate}</span>
-                                  {report.startDate !== report.endDate && <> → <span className="font-bold text-slate-600 dark:text-slate-300">{report.endDate}</span></>}
-                                </p>
-                              </div>
-                              <span className="text-[9px] text-slate-400 font-mono">
-                                {new Date(report.createdAt).toLocaleDateString('vi-VN')}
-                              </span>
-                            </div>
-
-                            <p className="text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-850 p-2 rounded-lg border border-slate-100 dark:border-slate-800 text-[11px]">
-                              <span className="font-bold text-slate-400">Lý do:</span> {report.reason}
-                            </p>
-
-                            <div className="flex items-center justify-between gap-2 pt-1">
-                              <span className="text-[10px] text-slate-400 font-mono">SĐT: {report.parentPhone}</span>
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRejectAbsence(report.id)}
-                                  className="px-2.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg transition cursor-pointer"
-                                >
-                                  Từ chối
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleApproveAbsence(report.id)}
-                                  className={`px-3 py-1 text-[10px] font-extrabold text-white rounded-lg transition cursor-pointer shadow-xs ${
-                                    settings.themeColor === 'emerald' ? 'bg-emerald-600 hover:bg-emerald-500' :
-                                    settings.themeColor === 'violet' ? 'bg-violet-600 hover:bg-violet-500' :
-                                    settings.themeColor === 'rose' ? 'bg-rose-600 hover:bg-rose-500' :
-                                    settings.themeColor === 'amber' ? 'bg-amber-600 hover:bg-amber-500' :
-                                    'bg-indigo-600 hover:bg-indigo-500'
-                                  }`}
-                                >
-                                  Đồng ý
-                                </button>
-                              </div>
-                            </div>
+                      {notifTab === 'absence' ? (
+                        displayedAbsenceReports.filter(r => r.status === 'pending').length === 0 ? (
+                          <div className="p-8 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
+                            <Check size={28} className="text-emerald-500 bg-emerald-500/10 p-1.5 rounded-full" />
+                            <p className="font-bold text-slate-700 dark:text-slate-300">Không có đơn báo vắng chưa duyệt.</p>
+                            <p className="text-[10px] text-slate-400">Các đơn xin nghỉ đã được xử lý xong.</p>
                           </div>
-                        ))
+                        ) : (
+                          displayedAbsenceReports.filter(r => r.status === 'pending').map((report) => (
+                            <div key={report.id} className="p-4 space-y-2.5 hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <h4 className="font-bold text-slate-850 dark:text-slate-100">
+                                    {report.studentName} <span className="font-normal text-slate-400">({report.className})</span>
+                                  </h4>
+                                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                    Nghỉ: <span className="font-bold text-slate-600 dark:text-slate-300">{report.startDate}</span>
+                                    {report.startDate !== report.endDate && <> → <span className="font-bold text-slate-600 dark:text-slate-300">{report.endDate}</span></>}
+                                  </p>
+                                </div>
+                                <span className="text-[9px] text-slate-400 font-mono">
+                                  {new Date(report.createdAt).toLocaleDateString('vi-VN')}
+                                </span>
+                              </div>
+
+                              <p className="text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-850 p-2 rounded-lg border border-slate-100 dark:border-slate-800 text-[11px]">
+                                <span className="font-bold text-slate-400">Lý do:</span> {report.reason}
+                              </p>
+
+                              <div className="flex items-center justify-between gap-2 pt-1">
+                                <span className="text-[10px] text-slate-400 font-mono">SĐT: {report.parentPhone}</span>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectAbsence(report.id)}
+                                    className="px-2.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg transition cursor-pointer"
+                                  >
+                                    Từ chối
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApproveAbsence(report.id)}
+                                    className={`px-3 py-1 text-[10px] font-extrabold text-white rounded-lg transition cursor-pointer shadow-xs ${
+                                      settings.themeColor === 'emerald' ? 'bg-emerald-600 hover:bg-emerald-500' :
+                                      settings.themeColor === 'violet' ? 'bg-violet-600 hover:bg-violet-500' :
+                                      settings.themeColor === 'rose' ? 'bg-rose-600 hover:bg-rose-500' :
+                                      settings.themeColor === 'amber' ? 'bg-amber-600 hover:bg-amber-500' :
+                                      'bg-indigo-600 hover:bg-indigo-500'
+                                    }`}
+                                  >
+                                    Đồng ý
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )
+                      ) : (
+                        displayedNotifications.length === 0 ? (
+                          <div className="p-8 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
+                            <span className="text-2xl">🔔</span>
+                            <p className="font-bold text-slate-700 dark:text-slate-300">Không có thông báo tương tác.</p>
+                            <p className="text-[10px] text-slate-400">Mọi hành động từ phụ huynh sẽ báo ở đây.</p>
+                          </div>
+                        ) : (
+                          displayedNotifications.map((notif) => {
+                            const getNotifIcon = () => {
+                              switch (notif.type) {
+                                case 'fee_payment':
+                                  return <DollarSign size={13} className="text-emerald-500" />;
+                                case 'talent_register':
+                                  return <Sparkles size={13} className="text-pink-500" />;
+                                case 'talent_change':
+                                  return <BookOpen size={13} className="text-amber-500" />;
+                                case 'absence_request':
+                                  return <Calendar size={13} className="text-rose-500" />;
+                                default:
+                                  return <Bell size={13} className="text-blue-500" />;
+                              }
+                            };
+
+                            const getIconBg = () => {
+                              switch (notif.type) {
+                                case 'fee_payment':
+                                  return 'bg-emerald-50 dark:bg-emerald-950/30';
+                                case 'talent_register':
+                                  return 'bg-pink-50 dark:bg-pink-950/30';
+                                case 'talent_change':
+                                  return 'bg-amber-50 dark:bg-amber-950/30';
+                                case 'absence_request':
+                                  return 'bg-rose-50 dark:bg-rose-950/30';
+                                default:
+                                  return 'bg-blue-50 dark:bg-blue-950/30';
+                              }
+                            };
+
+                            return (
+                              <div
+                                key={notif.id}
+                                className={`p-4 transition-all hover:bg-slate-50/50 dark:hover:bg-slate-800/20 relative flex items-start gap-3 ${
+                                  !notif.isRead ? 'bg-blue-500/[0.02] dark:bg-blue-500/[0.04]' : 'opacity-80'
+                                }`}
+                              >
+                                <div className={`p-2 rounded-xl shrink-0 ${getIconBg()}`}>
+                                  {getNotifIcon()}
+                                </div>
+                                <div className="flex-1 min-w-0 space-y-1">
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="font-bold text-slate-850 dark:text-slate-100 truncate text-[11px]">
+                                      {notif.studentName} <span className="font-normal text-slate-400">({notif.className})</span>
+                                    </span>
+                                    <span className="text-[9px] text-slate-400 font-mono shrink-0">
+                                      {new Date(notif.createdAt).toLocaleDateString('vi-VN')}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
+                                    {notif.content}
+                                  </p>
+                                  <div className="flex items-center justify-between gap-2 pt-1">
+                                    <span className="text-[10px] text-slate-400">SĐT: {notif.parentPhone}</span>
+                                    {!notif.isRead && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkNotifAsReadInApp(notif.id)}
+                                        className="text-[10px] text-blue-500 hover:text-blue-600 font-bold transition cursor-pointer"
+                                      >
+                                        Đánh dấu đã đọc
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                {!notif.isRead && (
+                                  <span className="absolute top-4 right-4 w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                                )}
+                              </div>
+                            );
+                          })
+                        )
                       )}
                     </div>
 
@@ -574,7 +748,7 @@ export default function App() {
                         }}
                         className="w-full text-[10px] font-extrabold uppercase text-blue-500 hover:text-blue-600 dark:hover:text-blue-400 tracking-wider transition cursor-pointer"
                       >
-                        Xem chi tiết báo vắng
+                        {notifTab === 'absence' ? 'Xem chi tiết báo vắng' : 'Đến bảng điều khiển giáo viên'}
                       </button>
                     </div>
                   </div>
@@ -660,11 +834,14 @@ export default function App() {
               {currentTab === 'classrooms' && (
                 <Classrooms
                   classrooms={displayedClassrooms}
+                  allClassrooms={classrooms}
                   saveClassrooms={handleSaveClassrooms}
                   settings={settings}
                   students={displayedStudents}
                   attendance={displayedAttendance}
                   saveAttendance={handleSaveAttendance}
+                  teachers={teachers}
+                  currentTeacherPhone={session?.teacherPhone}
                 />
               )}
 
@@ -714,12 +891,22 @@ export default function App() {
                 />
               )}
 
+              {currentTab === 'assessments' && (
+                <DailyAssessments
+                  students={displayedStudents}
+                  classrooms={displayedClassrooms}
+                  settings={settings}
+                  isTeacher={session?.isTeacher}
+                />
+              )}
+
               {currentTab === 'reports' && (
                 <Reports
                   students={displayedStudents}
                   classrooms={displayedClassrooms}
                   attendance={displayedAttendance}
                   settings={settings}
+                  isTeacher={session?.isTeacher}
                 />
               )}
 

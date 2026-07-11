@@ -28,8 +28,8 @@ export default function Login({ onLoginSuccess, settings }: LoginProps) {
   const [teacherMode, setTeacherMode] = useState<AuthMode>('login');
 
   // Admin login states
-  const [email, setEmail] = useState('admin@school.edu.vn');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // Parent login/register states
   const [parentPhone, setParentPhone] = useState('');
@@ -58,7 +58,15 @@ export default function Login({ onLoginSuccess, settings }: LoginProps) {
         return;
       }
 
-      // Đăng nhập thành công với bất kỳ tài khoản admin nào để dễ trải nghiệm
+      // Kiểm tra mật khẩu quản trị
+      const storedAdminPass = StorageService.getAdminPassword();
+      if (password.trim() !== storedAdminPass) {
+        setError('Mật khẩu quản trị viên không chính xác.');
+        setLoading(false);
+        return;
+      }
+
+      // Đăng nhập thành công
       const session: UserSession = {
         isAdmin: true,
         email: email.trim(),
@@ -393,7 +401,7 @@ export default function Login({ onLoginSuccess, settings }: LoginProps) {
                 </label>
                 <button
                   type="button"
-                  onClick={() => alert('Mẹo: Hệ thống cho phép đăng nhập thử nghiệm bằng thông tin mặc định: admin@school.edu.vn / admin123')}
+                  onClick={() => alert('Vui lòng liên hệ ban giám hiệu nhà trường để khôi phục mật khẩu.')}
                   className="text-xs text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 transition font-medium"
                 >
                   Quên mật khẩu?
@@ -413,15 +421,6 @@ export default function Login({ onLoginSuccess, settings }: LoginProps) {
                   required
                 />
               </div>
-            </div>
-
-            {/* Info card for admin demo credentials */}
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/50 rounded-lg text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                <Sparkles size={12} className="text-indigo-500" /> Tài khoản quản trị mẫu:
-              </div>
-              <div>Email: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">admin@school.edu.vn</code></div>
-              <div>Mật khẩu: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">admin123</code></div>
             </div>
 
             <button
@@ -521,18 +520,6 @@ export default function Login({ onLoginSuccess, settings }: LoginProps) {
                 {teacherMode === 'login' ? 'Đăng ký ngay' : 'Đăng nhập ngay'}
               </button>
             </div>
-
-            {/* Info card for teacher demo credentials */}
-            {teacherMode === 'login' && (
-              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/50 rounded-lg text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                  <Sparkles size={12} className="text-violet-500" /> Giáo viên mẫu đã liên kết lớp:
-                </div>
-                <div>SĐT: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">0911111111</code> (Cô Mai - Lớp 12A2)</div>
-                <div>SĐT: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">0922222222</code> (Cô Lan - Lớp 11B1)</div>
-                <div>Mật khẩu mẫu chung: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">123</code></div>
-              </div>
-            )}
 
             <button
               type="submit"
@@ -635,18 +622,6 @@ export default function Login({ onLoginSuccess, settings }: LoginProps) {
                 {parentMode === 'login' ? 'Đăng ký ngay' : 'Đăng nhập ngay'}
               </button>
             </div>
-
-            {/* Info card for parent demo credentials */}
-            {parentMode === 'login' && (
-              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/50 rounded-lg text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                  <Sparkles size={12} className="text-emerald-500" /> Phụ huynh mẫu đã liên kết con:
-                </div>
-                <div>SĐT: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">0912345678</code> (Con: Nguyễn Hoàng Nam)</div>
-                <div>SĐT: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">0987654321</code> (Con: Trần Thị Mai Anh)</div>
-                <div>Mật khẩu trải nghiệm chung: <code className="text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">123</code></div>
-              </div>
-            )}
 
             <button
               type="submit"

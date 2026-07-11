@@ -28,10 +28,31 @@ interface ReportsProps {
   classrooms: Classroom[];
   attendance: AttendanceRecord[];
   settings: SchoolSettings;
+  isTeacher?: boolean;
 }
 
-export default function Reports({ students, classrooms, attendance, settings }: ReportsProps) {
-  const [selectedClassId, setSelectedClassId] = useState('all');
+export default function Reports({ students, classrooms, attendance, settings, isTeacher = false }: ReportsProps) {
+  const [selectedClassId, setSelectedClassId] = useState(() => {
+    if (isTeacher && classrooms.length > 0) {
+      return classrooms[0].id;
+    }
+    return 'all';
+  });
+
+  // If teacher has no classrooms, show warning message
+  if (isTeacher && classrooms.length === 0) {
+    return (
+      <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl border border-slate-100 dark:border-slate-800 text-center shadow-xs max-w-lg mx-auto my-12">
+        <div className="w-16 h-16 bg-amber-50 dark:bg-amber-950/30 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Filter size={32} />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800 dark:text-white">Bạn chưa có lớp học nào</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+          Hệ thống báo cáo thống kê yêu cầu ít nhất một lớp học do chính bạn tạo để hiển thị thông tin. Vui lòng tạo lớp học tại phần "Quản lý lớp học" trước.
+        </p>
+      </div>
+    );
+  }
 
   // 1. Filter students and attendance records by the selected class
   const filteredStudents = useMemo(() => {
@@ -332,7 +353,7 @@ export default function Reports({ students, classrooms, attendance, settings }: 
             onChange={(e) => setSelectedClassId(e.target.value)}
             className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-inner outline-none"
           >
-            <option value="all">Tất cả khối lớp</option>
+            {!isTeacher && <option value="all">Tất cả khối lớp</option>}
             {classrooms.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}

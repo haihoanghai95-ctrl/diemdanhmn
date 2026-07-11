@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Heart, 
   Calendar, 
@@ -31,10 +31,80 @@ import {
   Bell,
   CreditCard,
   QrCode,
-  Coins
+  Coins,
+  KeyRound,
+  MapPin,
+  Info,
+  BellRing,
+  Activity
 } from 'lucide-react';
-import { UserSession, Student, Classroom, TalentSubject, WeeklyMenu, AbsenceReport, AttendanceRecord, HealthRecord, DailyAssessment, TeacherNotification } from '../types';
+import { UserSession, Student, Classroom, TalentSubject, WeeklyMenu, AbsenceReport, AttendanceRecord, HealthRecord, DailyAssessment, TeacherNotification, ClassActivity, ParentNotification } from '../types';
 import { StorageService } from '../utils/storage';
+import ChangePasswordModal from './ChangePasswordModal';
+
+export interface SchoolEvent {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time?: string;
+  description: string;
+  location: string;
+  type: 'meeting' | 'festival' | 'holiday' | 'health' | 'sports';
+  note?: string;
+}
+
+const DEFAULT_EVENTS: SchoolEvent[] = [
+  {
+    id: 'evt_1',
+    title: 'Họp Phụ Huynh Học Kỳ I',
+    date: '2026-07-16',
+    time: '08:30 - 11:00',
+    description: 'Gặp gỡ giáo viên chủ nhiệm, thảo luận về chương trình học bán trú, hoạt động dã ngoại và định hướng chăm sóc giáo dục bé trong học kỳ mới.',
+    location: 'Phòng sinh hoạt lớp chủ nhiệm của bé',
+    type: 'meeting',
+    note: 'Phụ huynh vui lòng đi đúng giờ và không dẫn theo các bé để buổi họp diễn ra tập trung nhất.'
+  },
+  {
+    id: 'evt_2',
+    title: 'Ngày Hội Đọc Sách & Sáng Tạo',
+    date: '2026-07-22',
+    time: '08:00 - 16:00',
+    description: 'Bé tham gia trải nghiệm đọc sách tranh tương tác, thiết kế dấu trang sách (bookmark) xinh xắn và tham gia vẽ tranh cát sáng tạo cùng cô giáo.',
+    location: 'Sân trường chính & Thư viện sách thiếu nhi',
+    type: 'festival',
+    note: 'Nhà trường khuyến khích phụ huynh tặng 1 cuốn sách cũ cho thư viện của trường để nhân rộng văn hóa đọc.'
+  },
+  {
+    id: 'evt_3',
+    title: 'Kỷ Niệm Ngày 27/7 (Học sinh nghỉ học)',
+    date: '2026-07-27',
+    time: 'Cả ngày',
+    description: 'Nghỉ lễ tri ân ngày Thương binh - Liệt sĩ. Trường nghỉ dạy 01 ngày theo quy định nhà nước.',
+    location: 'Nghỉ tại nhà',
+    type: 'holiday',
+    note: 'Các con nghỉ học và sinh hoạt tại gia đình. Thứ Ba ngày 28/7 trường đón các con đi học bình thường.'
+  },
+  {
+    id: 'evt_4',
+    title: 'Kiểm Tra Sức Khỏe & Răng Miệng Định Kỳ',
+    date: '2026-08-04',
+    time: '08:00 - 11:30',
+    description: 'Đội ngũ bác sĩ từ bệnh viện Nhi đồng đến khám tai mũi họng, kiểm tra răng miệng, đo thị lực và đánh giá thể lực phát triển định kỳ cho các con.',
+    location: 'Phòng Y tế trường',
+    type: 'health',
+    note: 'Phụ huynh cập nhật sổ theo dõi sức khỏe của con tại ứng dụng sau khi có kết quả từ bác sĩ.'
+  },
+  {
+    id: 'evt_5',
+    title: 'Ngày Hội Thể Thao "Little Olympics 2026"',
+    date: '2026-08-15',
+    time: '07:30 - 10:30',
+    description: 'Sự kiện thể thao ngoài trời bùng nổ năng lượng cho các bé: Chạy tiếp sức, kéo co, nhảy bao bố và vượt chướng ngại vật liên hoàn.',
+    location: 'Sân vận động thể chất ngoài trời của trường',
+    type: 'sports',
+    note: 'Phụ huynh vui lòng trang bị cho bé giày thể thao mềm, mũ che nắng và mặc đồng phục thể thao của trường.'
+  }
+];
 
 interface ParentDashboardProps {
   session: UserSession;
@@ -47,11 +117,39 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [selectedClass, setSelectedClass] = useState<Classroom | null>(null);
+
+  // School events state & filters
+  const [events, setEvents] = useState<SchoolEvent[]>([]);
+  const [eventRsvps, setEventRsvps] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('sma_parent_event_rsvps');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [selectedEventCategory, setSelectedEventCategory] = useState<string>('all');
+  const [selectedEventDetails, setSelectedEventDetails] = useState<SchoolEvent | null>(null);
+
+  const handleRsvpChange = (eventId: string, status: 'going' | 'cant') => {
+    const key = `${eventId}_${session.parentPhone || 'anonymous'}`;
+    const updated = {
+      ...eventRsvps,
+      [key]: status
+    };
+    setEventRsvps(updated);
+    try {
+      localStorage.setItem('sma_parent_event_rsvps', JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+    }
+  };
   
-  // Menu tab state: 'menu' | 'talent' | 'absence' | 'attendance' | 'health' | 'assessment'
-  const [activeTab, setActiveTab] = useState<'menu' | 'talent' | 'absence' | 'attendance' | 'health' | 'assessment'>('menu');
+  // Menu tab state: 'menu' | 'talent' | 'absence' | 'attendance' | 'health' | 'assessment' | 'activities'
+  const [activeTab, setActiveTab] = useState<'menu' | 'talent' | 'absence' | 'attendance' | 'health' | 'assessment' | 'activities'>('menu');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Attendance Records history list
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
@@ -83,6 +181,87 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
   const [talentSuccess, setTalentSuccess] = useState('');
   const [simulatedMonth, setSimulatedMonth] = useState('2026-07');
   const [isConfirmTalentModalOpen, setIsConfirmTalentModalOpen] = useState(false);
+
+  // Parent notifications state
+  const [parentNotifications, setParentNotifications] = useState<ParentNotification[]>([]);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+
+  const loadParentNotifications = () => {
+    const allNotifs = StorageService.getParentNotifications();
+    if (selectedClass) {
+      const filtered = allNotifs.filter(n => n.classId === selectedClass.id);
+      setParentNotifications(filtered);
+    } else {
+      setParentNotifications([]);
+    }
+  };
+
+  const handleMarkParentNotifAsRead = (id: string) => {
+    const allNotifs = StorageService.getParentNotifications();
+    const updated = allNotifs.map(n => n.id === id ? { ...n, isRead: true } : n);
+    StorageService.saveParentNotifications(updated);
+    if (selectedClass) {
+      setParentNotifications(updated.filter(n => n.classId === selectedClass.id));
+    }
+  };
+
+  const handleMarkAllParentNotifsAsRead = () => {
+    if (!selectedClass) return;
+    const allNotifs = StorageService.getParentNotifications();
+    const updated = allNotifs.map(n => n.classId === selectedClass.id ? { ...n, isRead: true } : n);
+    StorageService.saveParentNotifications(updated);
+    setParentNotifications(updated.filter(n => n.classId === selectedClass.id));
+  };
+
+  const handleDeleteParentNotif = (id: string) => {
+    const allNotifs = StorageService.getParentNotifications();
+    const updated = allNotifs.filter(n => n.id !== id);
+    StorageService.saveParentNotifications(updated);
+    if (selectedClass) {
+      setParentNotifications(updated.filter(n => n.classId === selectedClass.id));
+    }
+  };
+
+  // Class activities states
+  const [allClassActivities, setAllClassActivities] = useState<ClassActivity[]>([]);
+  const [selectedActivityDate, setSelectedActivityDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+
+  useEffect(() => {
+    setAllClassActivities(StorageService.getClassActivities());
+    loadParentNotifications();
+  }, [activeTab, selectedClass]);
+
+  const currentClassActivities = useMemo(() => {
+    if (!selectedClass) return [];
+    const filtered = allClassActivities.filter(
+      a => a.classId === selectedClass.id && a.date === selectedActivityDate
+    );
+    
+    if (filtered.length === 0) {
+      const standardRoutine = [
+        { time: '07:30 - 08:15', title: 'Đón trẻ & Tập thể dục buổi sáng ☀️' },
+        { time: '08:15 - 09:30', title: 'Hoạt động học tập mầm non (Vẽ tranh đất nặn) 🎨' },
+        { time: '09:30 - 10:30', title: 'Vui chơi ngoài trời, khám phá thiên nhiên 🌿' },
+        { time: '10:30 - 11:30', title: 'Vệ sinh cá nhân & Bữa trưa ngon miệng 🍲' },
+        { time: '11:30 - 14:00', title: 'Giấc ngủ trưa yên lành của bé 💤' },
+        { time: '14:15 - 15:00', title: 'Ăn xế dinh dưỡng (Uống sữa, bánh ngọt) 🥛' },
+        { time: '15:00 - 16:30', title: 'Sinh hoạt tự do, kể chuyện cổ tích & Trả trẻ 🎒' },
+      ];
+      
+      return standardRoutine.map((item, index) => ({
+        id: `act_gen_${selectedClass.id}_${selectedActivityDate}_${index}`,
+        classId: selectedClass.id,
+        date: selectedActivityDate,
+        time: item.time,
+        title: item.title,
+        completed: false
+      }));
+    }
+    
+    return [...filtered].sort((a, b) => a.time.localeCompare(b.time));
+  }, [allClassActivities, selectedClass, selectedActivityDate]);
 
   // Payment states after talent registration
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -120,6 +299,9 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
 
     // Load daily assessments
     setDailyAssessments(StorageService.getDailyAssessments());
+
+    // Load school events
+    setEvents(StorageService.getSchoolEvents());
   }, [session.parentPhone]);
 
   // Update selected class when selected student changes
@@ -128,8 +310,12 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       const cls = classrooms.find(c => c.id === selectedStudent.classId) || null;
       setSelectedClass(cls);
       
-      // Load student registered talent subjects
-      setSelectedTalentIds(selectedStudent.registeredTalentSubjects || []);
+      // Load student registered talent subjects and auto-add mandatory ones
+      const registeredIds = selectedStudent.registeredTalentSubjects || [];
+      const mandatoryIds = cls?.talentSubjects?.filter(s => s.isMandatory).map(s => s.id) || [];
+      const combinedIds = Array.from(new Set([...registeredIds, ...mandatoryIds]));
+      
+      setSelectedTalentIds(combinedIds);
       setTalentSuccess('');
 
       // Load attendance logs for this child
@@ -162,6 +348,10 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
   const handleTalentToggle = (subjectId: string) => {
     const isLocked = selectedStudent?.talentLastRegisteredMonth === simulatedMonth;
     if (isLocked) return; // Locked for the current month!
+    
+    // Check if the subject is mandatory
+    const isMandatory = selectedClass?.talentSubjects?.some(s => s.id === subjectId && s.isMandatory);
+    if (isMandatory) return; // Cannot toggle off mandatory subjects!
     
     setTalentSuccess('');
     if (selectedTalentIds.includes(subjectId)) {
@@ -228,13 +418,29 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       // CREATE TEACHER NOTIFICATION
       // Let's determine if it's a register or change
       const isChange = !!selectedStudent.talentLastRegisteredMonth;
-      const subjectListStr = selectedSubjectNames.length > 0 
-        ? selectedSubjectNames.join(', ') 
-        : 'Không đăng ký môn nào (Hủy đăng ký)';
-        
-      const content = isChange
-        ? `Phụ huynh đã THAY ĐỔI đăng ký môn năng khiếu của bé sang: ${subjectListStr} (Học phí dự kiến: ${totalFee.toLocaleString('vi-VN')} đ/tháng) áp dụng từ tháng ${simulatedMonth}.`
-        : `Phụ huynh đã ĐĂNG KÝ mới môn năng khiếu cho bé: ${subjectListStr} với tổng học phí ${totalFee.toLocaleString('vi-VN')} đ/tháng cho tháng ${simulatedMonth}.`;
+      const oldSubjects = selectedStudent.registeredTalentSubjects || [];
+      const addedIds = selectedTalentIds.filter(id => !oldSubjects.includes(id));
+      const removedIds = oldSubjects.filter(id => !selectedTalentIds.includes(id));
+
+      const addedNames = addedIds.map(id => selectedClass?.talentSubjects?.find(s => s.id === id)?.name).filter(Boolean);
+      const removedNames = removedIds.map(id => selectedClass?.talentSubjects?.find(s => s.id === id)?.name).filter(Boolean);
+
+      let content = '';
+      let notifType: 'talent_register' | 'talent_change' = 'talent_register';
+      
+      if (addedNames.length > 0 && removedNames.length === 0) {
+        content = `Phụ huynh đã ĐĂNG KÝ mới môn năng khiếu cho bé: ${addedNames.join(', ')} với học phí ${totalFee.toLocaleString('vi-VN')} đ/tháng cho tháng ${simulatedMonth}.`;
+        notifType = 'talent_register';
+      } else if (removedNames.length > 0 && addedNames.length === 0) {
+        content = `Phụ huynh đã HỦY ĐĂNG KÝ môn năng khiếu: ${removedNames.join(', ')}. Danh sách môn còn học: ${selectedSubjectNames.join(', ') || 'Không có môn nào'} (Học phí mới: ${totalFee.toLocaleString('vi-VN')} đ/tháng).`;
+        notifType = 'talent_change';
+      } else if (addedNames.length > 0 && removedNames.length > 0) {
+        content = `Phụ huynh đã THAY ĐỔI môn năng khiếu (ĐĂNG KÝ MỚI: ${addedNames.join(', ')} & HỦY ĐĂNG KÝ: ${removedNames.join(', ')}). Học phí mới: ${totalFee.toLocaleString('vi-VN')} đ/tháng.`;
+        notifType = 'talent_change';
+      } else {
+        content = `Phụ huynh cập nhật lại danh sách môn năng khiếu của bé: ${selectedSubjectNames.join(', ') || 'Không đăng ký môn nào'}. Học phí: ${totalFee.toLocaleString('vi-VN')} đ/tháng.`;
+        notifType = 'talent_change';
+      }
 
       const newNotif: TeacherNotification = {
         id: 'notif_talent_' + Date.now(),
@@ -244,10 +450,11 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
         className: selectedClass?.name || selectedStudent.className || 'Lớp học',
         parentPhone: session.parentPhone || '',
         parentName: session.parentName || 'Phụ huynh',
-        type: isChange ? 'talent_change' : 'talent_register',
+        type: notifType,
         content,
         createdAt: new Date().toISOString(),
         read: false,
+        isRead: false,
       };
 
       const existingNotifs = StorageService.getTeacherNotifications();
@@ -261,8 +468,9 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       );
 
       // Open payment modal if there is a positive fee
-      if (totalFee > 0) {
-        setPaymentAmount(totalFee);
+      const grandTotalFee = totalFee + (selectedStudent.otherFee || 0);
+      if (grandTotalFee > 0) {
+        setPaymentAmount(grandTotalFee);
         setPaymentSubjects(selectedSubjectsList);
         setPaymentMethod('qr');
         setIsPaymentModalOpen(true);
@@ -310,6 +518,24 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
     const currentReports = StorageService.getAbsenceReports();
     StorageService.saveAbsenceReports([newReport, ...currentReports]);
 
+    // Create Teacher Notification for leave request
+    const newNotif: TeacherNotification = {
+      id: `notif_abs_${Date.now()}`,
+      studentId: selectedStudent.id,
+      studentName: selectedStudent.fullName,
+      classId: selectedStudent.classId,
+      className: selectedClass.name,
+      parentPhone: session.parentPhone || '',
+      parentName: session.parentName || 'Phụ huynh',
+      type: 'absence_request',
+      content: `Phụ huynh gửi đơn xin nghỉ học từ ngày ${startDate} đến ${endDate}. Lý do: ${reason.trim()}`,
+      createdAt: new Date().toISOString(),
+      read: false,
+      isRead: false,
+    };
+    const existingNotifs = StorageService.getTeacherNotifications();
+    StorageService.saveTeacherNotifications([newNotif, ...existingNotifs]);
+
     setFormSuccess('Gửi đơn xin nghỉ học thành công! Đang chờ Nhà Trường phê duyệt.');
     setStartDate('');
     setEndDate('');
@@ -322,6 +548,31 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       setIsAbsenceModalOpen(false);
       setFormSuccess('');
     }, 1500);
+  };
+
+  const handleConfirmPaymentSent = () => {
+    if (!selectedStudent) return;
+    
+    const newNotif: TeacherNotification = {
+      id: 'notif_pay_' + Date.now(),
+      studentId: selectedStudent.id,
+      studentName: selectedStudent.fullName,
+      classId: selectedStudent.classId,
+      className: selectedClass?.name || selectedStudent.className || 'Lớp học',
+      parentPhone: session.parentPhone || '',
+      parentName: session.parentName || 'Phụ huynh',
+      type: 'fee_payment',
+      content: `Phụ huynh báo ĐÃ CHUYỂN KHOẢN/THANH TOÁN học phí năng khiếu tháng ${simulatedMonth.split('-')[1]} số tiền ${paymentAmount.toLocaleString('vi-VN')} đ cho bé ${selectedStudent.fullName}.`,
+      createdAt: new Date().toISOString(),
+      read: false,
+      isRead: false,
+    };
+
+    const existingNotifs = StorageService.getTeacherNotifications();
+    StorageService.saveTeacherNotifications([newNotif, ...existingNotifs]);
+
+    alert(`Đã gửi thông báo xác nhận thanh toán học phí cho Giáo viên chủ nhiệm lớp ${selectedClass?.name || ''}!`);
+    setIsPaymentModalOpen(false);
   };
 
   const getStatusBadge = (status: 'pending' | 'approved' | 'rejected') => {
@@ -357,6 +608,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
     { id: 'attendance' as const, label: 'Nhật ký điểm danh', icon: Camera },
     { id: 'health' as const, label: 'Sức khỏe của con', icon: Heart },
     { id: 'assessment' as const, label: 'Đánh giá hằng ngày', icon: Smile },
+    { id: 'activities' as const, label: 'Lịch hoạt động lớp', icon: Activity },
   ];
 
   const getLogoBgClass = () => {
@@ -433,7 +685,17 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       </nav>
 
       {/* Sidebar Footer */}
-      <div className="p-4 border-t border-slate-100 dark:border-slate-800">
+      <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-1">
+        <button
+          onClick={() => setIsChangePasswordOpen(true)}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-650 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800/50 transition-all duration-200 cursor-pointer"
+        >
+          <KeyRound size={18} className="shrink-0" />
+          <span className={`transition-all duration-300 whitespace-nowrap ${sidebarCollapsed ? 'md:opacity-0 md:w-0 md:overflow-hidden' : 'opacity-100 w-auto'}`}>
+            Đổi mật khẩu
+          </span>
+        </button>
+
         <button
           onClick={onLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/20 transition-all duration-200 cursor-pointer"
@@ -513,7 +775,8 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                  activeTab === 'talent' ? 'Đăng ký môn năng khiếu' :
                  activeTab === 'absence' ? 'Báo vắng trực tuyến' :
                  activeTab === 'attendance' ? 'Nhật ký điểm danh' :
-                 activeTab === 'health' ? 'Sức khỏe chỉ số của con' : 'Đánh giá hằng ngày từ cô'}
+                 activeTab === 'health' ? 'Sức khỏe chỉ số của con' : 
+                 activeTab === 'activities' ? 'Lịch hoạt động của lớp con' : 'Đánh giá hằng ngày từ cô'}
               </span>
             </div>
           </div>
@@ -529,6 +792,113 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
             <div className="hidden lg:flex items-center gap-2 px-3.5 py-1.5 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-full text-xs font-semibold text-slate-500 dark:text-slate-400 font-mono">
               <Clock size={14} className={settings.themeColor === 'rose' ? 'text-rose-500' : 'text-emerald-500'} />
               <span>{new Date().toLocaleDateString('vi-VN')}</span>
+            </div>
+
+            {/* Bell Notification Icon & Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)}
+                className="relative p-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-850 rounded-xl transition cursor-pointer"
+                title="Thông báo"
+              >
+                <Bell size={18} />
+                {parentNotifications.filter(n => !n.isRead).length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-rose-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse">
+                    {parentNotifications.filter(n => !n.isRead).length}
+                  </span>
+                )}
+              </button>
+
+              {isNotifDropdownOpen && (
+                <>
+                  {/* Invisible overlay to close on click outside */}
+                  <div
+                    className="fixed inset-0 z-30"
+                    onClick={() => setIsNotifDropdownOpen(false)}
+                  />
+                  
+                  {/* Dropdown body */}
+                  <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl shadow-xl z-40 overflow-hidden animate-fade-in">
+                    <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                        🔔 Thông báo của lớp ({parentNotifications.length})
+                      </span>
+                      {parentNotifications.filter(n => !n.isRead).length > 0 && (
+                        <button
+                          onClick={() => {
+                            handleMarkAllParentNotifsAsRead();
+                          }}
+                          className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                        >
+                          Đọc tất cả
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                      {parentNotifications.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-1.5">
+                          <span className="text-xl">📭</span>
+                          <p className="text-xs">Không có thông báo nào từ lớp học.</p>
+                        </div>
+                      ) : (
+                        parentNotifications.map((notif) => (
+                          <div
+                            key={notif.id}
+                            className={`p-3.5 transition duration-200 relative group flex gap-2.5 ${
+                              notif.isRead ? 'opacity-70' : 'bg-emerald-500/5'
+                            }`}
+                          >
+                            <div className="shrink-0 mt-0.5">
+                              {notif.type === 'activity_create' ? (
+                                <span className="text-emerald-500 text-sm">✨</span>
+                              ) : (
+                                <span className="text-blue-500 text-sm">📝</span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase font-mono">
+                                  {notif.className}
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-mono">
+                                  {new Date(notif.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <h5 className="text-xs font-bold text-slate-800 dark:text-white leading-snug">
+                                {notif.title}
+                              </h5>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-450 leading-normal">
+                                {notif.content}
+                              </p>
+                              
+                              <div className="flex items-center gap-2 pt-1.5">
+                                {!notif.isRead && (
+                                  <button
+                                    onClick={() => handleMarkParentNotifAsRead(notif.id)}
+                                    className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                                  >
+                                    Đọc
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteParentNotif(notif.id)}
+                                  className="text-[10px] font-bold text-rose-500 hover:underline cursor-pointer ml-auto"
+                                >
+                                  Xóa
+                                </button>
+                              </div>
+                            </div>
+                            {!notif.isRead && (
+                              <span className="absolute top-3.5 right-3.5 w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* User Profile Badge (Right) */}
@@ -633,14 +1003,19 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
             {selectedStudent && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-gradient-to-r from-emerald-500/5 to-indigo-500/5 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 flex items-center justify-between shadow-xs">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Trạng Thái Đóng Học Phí Năng Khiếu</span>
+                  <div className="space-y-1.5 max-w-[70%]">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Trạng Thái Đóng Học Phí & Phí Khác</span>
                     <span className="text-xs font-extrabold text-slate-800 dark:text-white block">
-                      Tổng tiền: {((selectedStudent.talentFee || 0)).toLocaleString('vi-VN')} đ
+                      Tổng cộng: {((selectedStudent.talentFee || 0) + (selectedStudent.otherFee || 0)).toLocaleString('vi-VN')} đ
                     </span>
-                    <span className="text-[10px] text-slate-400 block font-medium">
-                      (Dành riêng cho {selectedStudent.registeredTalentSubjects?.length || 0} môn đăng ký)
-                    </span>
+                    <div className="text-[10px] text-slate-400 font-medium leading-relaxed space-y-0.5">
+                      <span className="block">• Học phí năng khiếu: {(selectedStudent.talentFee || 0).toLocaleString('vi-VN')} đ</span>
+                      {selectedStudent.otherFee !== undefined && selectedStudent.otherFee > 0 && (
+                        <span className="block text-rose-500 dark:text-rose-400 font-bold">
+                          • Phí khác: {selectedStudent.otherFee.toLocaleString('vi-VN')} đ {selectedStudent.otherFeeDescription && `(${selectedStudent.otherFeeDescription})`}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div>
                     {selectedStudent.talentFeePaid ? (
@@ -714,6 +1089,219 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                 </div>
               </div>
             )}
+
+            {/* 3. UPCOMING SCHOOL EVENTS & HOLIDAYS */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm mt-6">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="p-2 bg-rose-500/10 text-rose-500 rounded-xl">
+                      <Calendar size={18} />
+                    </span>
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      Lịch Sự Kiện & Ngày Lễ Sắp Tới
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Cập nhật kế hoạch họp phụ huynh, ngày hội sáng tạo, khám sức khỏe và lịch nghỉ lễ của trường để đồng hành cùng bé.
+                  </p>
+                </div>
+
+                {/* Event Category Filters */}
+                <div className="flex flex-wrap gap-1.5 select-none">
+                  {[
+                    { id: 'all', label: 'Tất cả' },
+                    { id: 'meeting', label: 'Họp PH' },
+                    { id: 'festival', label: 'Lễ hội' },
+                    { id: 'holiday', label: 'Ngày nghỉ' },
+                    { id: 'health', label: 'Sức khỏe' },
+                    { id: 'sports', label: 'Thể thao' },
+                  ].map(category => (
+                    <button
+                      key={category.id}
+                      onClick={() => setSelectedEventCategory(category.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        selectedEventCategory === category.id
+                          ? settings.themeColor === 'emerald' ? 'bg-emerald-600 text-white shadow-xs' :
+                            settings.themeColor === 'violet' ? 'bg-violet-600 text-white shadow-xs' :
+                            settings.themeColor === 'rose' ? 'bg-rose-600 text-white shadow-xs' :
+                            settings.themeColor === 'amber' ? 'bg-amber-600 text-white shadow-xs' :
+                            'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {category.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Grid of Events */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                {events.filter(evt => selectedEventCategory === 'all' || evt.type === selectedEventCategory).length === 0 ? (
+                  <div className="col-span-full py-8 text-center bg-slate-55 dark:bg-slate-850/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                    <Info size={24} className="mx-auto text-slate-400 mb-2" />
+                    <p className="text-xs text-slate-400 font-semibold italic">Không có sự kiện nào phù hợp với bộ lọc hiện tại.</p>
+                  </div>
+                ) : (
+                  events.filter(evt => selectedEventCategory === 'all' || evt.type === evt.type)
+                    .filter(evt => selectedEventCategory === 'all' || evt.type === selectedEventCategory)
+                    .map(event => {
+                      const rsvpKey = `${event.id}_${session.parentPhone || 'anonymous'}`;
+                      const rsvpStatus = eventRsvps[rsvpKey] || 'not_set';
+                      
+                      // Calculate calendar month and day
+                      const [year, month, day] = event.date.split('-');
+                      const monthLabel = `Thg ${month}`;
+                      
+                      // Status and type badges styling
+                      let badgeBg = 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300';
+                      let badgeText = 'Sự kiện';
+                      let headerBg = 'bg-indigo-550/10 text-indigo-600 dark:bg-indigo-500/20';
+
+                      if (event.type === 'meeting') {
+                        badgeBg = 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
+                        badgeText = 'Họp phụ huynh';
+                        headerBg = 'bg-purple-500/15 text-purple-600 dark:text-purple-400';
+                      } else if (event.type === 'festival') {
+                        badgeBg = 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+                        badgeText = 'Ngày hội';
+                        headerBg = 'bg-amber-500/15 text-amber-600 dark:text-amber-400';
+                      } else if (event.type === 'holiday') {
+                        badgeBg = 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300';
+                        badgeText = 'Nghỉ lễ';
+                        headerBg = 'bg-rose-500/15 text-rose-600 dark:text-rose-400';
+                      } else if (event.type === 'health') {
+                        badgeBg = 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300';
+                        badgeText = 'Sức khỏe';
+                        headerBg = 'bg-teal-500/15 text-teal-600 dark:text-teal-400';
+                      } else if (event.type === 'sports') {
+                        badgeBg = 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
+                        badgeText = 'Thể chất';
+                        headerBg = 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400';
+                      }
+
+                      // Check days remaining
+                      const evtDate = new Date(event.date);
+                      const today = new Date();
+                      today.setHours(0,0,0,0);
+                      const diffTime = evtDate.getTime() - today.getTime();
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                      let diffLabel = '';
+                      if (diffDays === 0) {
+                        diffLabel = 'Hôm nay';
+                      } else if (diffDays === 1) {
+                        diffLabel = 'Ngày mai';
+                      } else if (diffDays > 1) {
+                        diffLabel = `Còn ${diffDays} ngày`;
+                      } else {
+                        diffLabel = 'Đã diễn ra';
+                      }
+
+                      return (
+                        <div
+                          key={event.id}
+                          className="flex flex-col sm:flex-row gap-4 p-4 rounded-2xl border border-slate-150 dark:border-slate-800 hover:shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition"
+                        >
+                          {/* Left: Date Block */}
+                          <div className="flex sm:flex-col items-center justify-center sm:w-16 h-16 sm:h-20 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shrink-0 text-center shadow-3xs">
+                            <div className={`w-full sm:h-7 px-3 sm:px-0 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${headerBg}`}>
+                              {monthLabel}
+                            </div>
+                            <div className="flex-1 px-3 sm:px-0 flex items-center justify-center font-extrabold text-lg sm:text-xl text-slate-800 dark:text-slate-100 bg-slate-50/50 dark:bg-slate-850 w-full">
+                              {day}
+                            </div>
+                          </div>
+
+                          {/* Right: Event Information */}
+                          <div className="flex-1 flex flex-col justify-between space-y-2">
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wide ${badgeBg}`}>
+                                  {badgeText}
+                                </span>
+                                {diffLabel && (
+                                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold ${
+                                    diffDays === 0 || diffDays === 1 
+                                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-extrabold animate-pulse' 
+                                      : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                                  }`}>
+                                    {diffLabel}
+                                  </span>
+                                )}
+                              </div>
+                              
+                              <h4 className="text-xs sm:text-sm font-extrabold text-slate-850 dark:text-slate-100 mt-1 hover:text-indigo-600 dark:hover:text-indigo-400 transition">
+                                {event.title}
+                              </h4>
+
+                              <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 leading-normal">
+                                {event.description}
+                              </p>
+
+                              <div className="grid grid-cols-1 gap-1 text-[10px] text-slate-500 dark:text-slate-400 mt-2 border-t border-slate-100 dark:border-slate-850/60 pt-2">
+                                <div className="flex items-center gap-1.5">
+                                  <Clock size={11} className="text-indigo-500 shrink-0" />
+                                  <span>Thời gian: <strong className="text-slate-700 dark:text-slate-300">{event.time || 'Cả ngày'}</strong></span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <MapPin size={11} className="text-amber-500 shrink-0" />
+                                  <span className="truncate">Địa điểm: <strong className="text-slate-700 dark:text-slate-300">{event.location}</strong></span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* RSVP persistence block */}
+                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-850/60">
+                              <div>
+                                {event.type === 'holiday' ? (
+                                  <span className="text-[10px] font-bold text-rose-500 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-2 py-1 rounded-lg">
+                                    🏖️ Toàn trường nghỉ học
+                                  </span>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] font-bold text-slate-400 block mr-1 uppercase">Xác nhận:</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRsvpChange(event.id, 'going')}
+                                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                                        rsvpStatus === 'going'
+                                          ? 'bg-emerald-500 text-white shadow-xs'
+                                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-450 dark:hover:bg-slate-700'
+                                      }`}
+                                    >
+                                      <Check size={10} /> Tham gia
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRsvpChange(event.id, 'cant')}
+                                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                                        rsvpStatus === 'cant'
+                                          ? 'bg-rose-500 text-white shadow-xs'
+                                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-450 dark:hover:bg-slate-700'
+                                      }`}
+                                    >
+                                      <X size={10} /> Bận
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => setSelectedEventDetails(event)}
+                                className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5 shrink-0 cursor-pointer"
+                              >
+                                Chi tiết →
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            </div>
 
             {/* 4. ACTIVE TAB PANEL RENDERING */}
             <div className="min-h-[400px] mt-4">
@@ -1151,14 +1739,21 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                                 >
                                   <div className="flex justify-between items-start w-full gap-2">
                                     <div className="space-y-1">
-                                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100 block">{subj.name}</span>
+                                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100 block flex items-center gap-1.5">
+                                        {subj.name}
+                                        {subj.isMandatory && (
+                                          <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[9px] font-extrabold uppercase tracking-wide">
+                                            Bắt buộc
+                                          </span>
+                                        )}
+                                      </span>
                                       <span className="text-xs font-bold text-amber-600 dark:text-amber-400 block font-mono">
                                         {(subj.fee).toLocaleString('vi-VN')} đ / tháng
                                       </span>
                                     </div>
                                     <div className={`w-5 h-5 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                                       isChecked 
-                                        ? isLocked ? 'bg-slate-400 border-slate-400 text-white' : 'bg-emerald-600 border-emerald-600 text-white' 
+                                        ? subj.isMandatory ? 'bg-rose-500 border-rose-500 text-white' : isLocked ? 'bg-slate-400 border-slate-400 text-white' : 'bg-emerald-600 border-emerald-600 text-white' 
                                         : 'border-slate-200 dark:border-slate-700'
                                     }`}>
                                       {isChecked && <Check size={12} strokeWidth={3} />}
@@ -1246,13 +1841,14 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                                 Đăng ký của con đã được chốt và gửi đến Giáo viên. Không thể thay đổi trong tháng này.
                               </p>
                             </div>
-                            {selectedTalentIds.length > 0 && (
+                             {(selectedTalentIds.length > 0 || (selectedStudent.otherFee || 0) > 0) && (
                               <button
                                 type="button"
                                 onClick={() => {
                                   const list = selectedClass?.talentSubjects?.filter(s => selectedTalentIds.includes(s.id)) || [];
-                                  const fee = list.reduce((sum, current) => sum + current.fee, 0) || 0;
-                                  setPaymentAmount(fee);
+                                  const talentFee = list.reduce((sum, current) => sum + current.fee, 0) || 0;
+                                  const totalFee = talentFee + (selectedStudent.otherFee || 0);
+                                  setPaymentAmount(totalFee);
                                   setPaymentSubjects(list);
                                   setPaymentMethod('qr');
                                   setIsPaymentModalOpen(true);
@@ -1794,6 +2390,133 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                 );
               })()}
 
+              {activeTab === 'activities' && selectedStudent && selectedClass && (() => {
+                const handlePrevDay = () => {
+                  const d = new Date(selectedActivityDate);
+                  d.setDate(d.getDate() - 1);
+                  setSelectedActivityDate(d.toISOString().split('T')[0]);
+                };
+
+                const handleNextDay = () => {
+                  const d = new Date(selectedActivityDate);
+                  d.setDate(d.getDate() + 1);
+                  setSelectedActivityDate(d.toISOString().split('T')[0]);
+                };
+
+                const formattedDateStr = (() => {
+                  const parts = selectedActivityDate.split('-');
+                  if (parts.length === 3) {
+                    return `Ngày ${parts[2]} tháng ${parts[1]} năm ${parts[0]}`;
+                  }
+                  return selectedActivityDate;
+                })();
+
+                return (
+                  <div className="space-y-6 animate-fade-in">
+                    {/* Header bar */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-xs">
+                      <div>
+                        <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                          <Activity size={20} className="text-emerald-500" />
+                          Lịch Hoạt Động Lớp {selectedClass.name}
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Xem chương trình sinh hoạt, bài học và hoạt động trong ngày của bé <span className="font-semibold text-emerald-600 dark:text-emerald-400">{selectedStudent.fullName}</span>.
+                        </p>
+                      </div>
+
+                      {/* Date selection controls */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handlePrevDay}
+                          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-150 dark:border-slate-800 rounded-xl transition cursor-pointer"
+                        >
+                          <ChevronLeft size={16} className="text-slate-600 dark:text-slate-300" />
+                        </button>
+                        
+                        <input
+                          type="date"
+                          value={selectedActivityDate}
+                          onChange={(e) => setSelectedActivityDate(e.target.value)}
+                          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                        />
+
+                        <button
+                          onClick={handleNextDay}
+                          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-150 dark:border-slate-800 rounded-xl transition cursor-pointer"
+                        >
+                          <ChevronRight size={16} className="text-slate-600 dark:text-slate-300" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Timeline box */}
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-xs space-y-6">
+                      <div className="border-b border-slate-100 dark:border-slate-800 pb-4 flex justify-between items-center">
+                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                          📅 Khung hoạt động: {formattedDateStr}
+                        </h4>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-full border border-emerald-500/10">
+                          {selectedClass.name}
+                        </span>
+                      </div>
+
+                      {currentClassActivities.length === 0 ? (
+                        <div className="text-center py-12 text-slate-400 flex flex-col items-center justify-center gap-2">
+                          <span className="text-3xl">⏰</span>
+                          <p className="text-xs font-semibold">Chưa có hoạt động nào được giáo viên cập nhật cho ngày này.</p>
+                        </div>
+                      ) : (
+                        <div className="relative border-l border-slate-150 pl-5 ml-4 space-y-6">
+                          {currentClassActivities.map((act) => (
+                            <div key={act.id} className="relative group">
+                              {/* Timeline indicator node */}
+                              <div className={`absolute -left-[27.5px] top-1.5 w-3.5 h-3.5 rounded-full border-2 transition-all ${
+                                act.completed 
+                                  ? 'bg-emerald-500 border-emerald-100 dark:border-emerald-950 scale-110 shadow-sm shadow-emerald-500/20' 
+                                  : 'bg-slate-200 border-white dark:border-slate-800 group-hover:bg-slate-300'
+                              }`} />
+
+                              <div className="bg-slate-50/40 dark:bg-slate-900/40 hover:bg-slate-50 dark:hover:bg-slate-850 p-4 border border-slate-100 dark:border-slate-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition duration-250">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-black uppercase text-rose-500 tracking-wider font-mono">
+                                      ⏱️ {act.time}
+                                    </span>
+                                    {act.completed ? (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-full">
+                                        đang thực hiện / đã hoàn thành
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 rounded-full">
+                                        Sắp diễn ra
+                                      </span>
+                                    )}
+                                  </div>
+                                  <h4 className="text-sm font-bold text-slate-800 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                                    {act.title}
+                                  </h4>
+                                </div>
+
+                                <div className="flex items-center gap-2 self-start sm:self-center">
+                                  <span className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 ${
+                                    act.completed
+                                      ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400'
+                                      : 'bg-slate-100 text-slate-400 dark:bg-slate-800'
+                                  }`}>
+                                    {act.completed ? '✔ Đã hoàn thành' : '⏳ Sắp diễn ra'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
             </div>
           </div>
         )}
@@ -2005,106 +2728,311 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
             </div>
 
             {/* Payment method content */}
-            <div className="space-y-4">
-              {paymentMethod === 'qr' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                  <div className="space-y-2 text-xs">
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal mb-2 font-medium">
-                      💡 Vui lòng mở ứng dụng Ngân hàng di động (Mobile Banking) để quét mã QR thanh toán nhanh hoặc thực hiện chuyển khoản thủ công theo thông tin dưới đây:
-                    </p>
-                    
-                    <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-150 dark:border-slate-800/60 space-y-1.5 font-medium text-slate-700 dark:text-slate-300">
-                      <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Ngân hàng</span>
-                        <span className="font-extrabold text-slate-800 dark:text-slate-200">Vietcombank (VCB)</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Số tài khoản</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">1023456789</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText('1023456789');
-                              alert('Đã sao chép số tài khoản!');
-                            }}
-                            className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer shrink-0"
-                          >
-                            [Sao chép]
-                          </button>
+            {(() => {
+              const payBank = selectedClass?.paymentBank || 'Vietcombank (VCB)';
+              const payAccountNo = selectedClass?.paymentAccountNo || '1023456789';
+              const payAccountName = selectedClass?.paymentAccountName || 'TRUONG MAM NON BAN MAI';
+              const paymentContentText = `HP NK ${selectedStudent.studentCode || 'HS'} ${selectedStudent.fullName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase()} T${simulatedMonth.split('-')[1]}`;
+
+              const getVietQRBankCode = (bankName: string) => {
+                const upper = bankName.toUpperCase();
+                if (upper.includes('VIETCOMBANK') || upper.includes('VCB')) return 'VCB';
+                if (upper.includes('TECHCOMBANK') || upper.includes('TCB')) return 'TCB';
+                if (upper.includes('VIETINBANK') || upper.includes('CTG')) return 'ICB';
+                if (upper.includes('BIDV')) return 'BIDV';
+                if (upper.includes('MBBANK') || upper.includes('MB')) return 'MB';
+                if (upper.includes('AGRIBANK') || upper.includes('VBA')) return 'VBA';
+                if (upper.includes('ACB')) return 'ACB';
+                if (upper.includes('TPBANK') || upper.includes('TPB')) return 'TPB';
+                if (upper.includes('VPBANK') || upper.includes('VPB')) return 'VPB';
+                if (upper.includes('SACOMBANK') || upper.includes('STB')) return 'STB';
+                if (upper.includes('HDBANK') || upper.includes('HDB')) return 'HDB';
+                if (upper.includes('SHB')) return 'SHB';
+                if (upper.includes('VIB')) return 'VIB';
+                return upper.replace(/[^A-Z0-9]/g, '');
+              };
+
+              const bankCode = getVietQRBankCode(payBank);
+
+              return (
+                <div className="space-y-4">
+                  {paymentMethod === 'qr' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                      <div className="space-y-2 text-xs">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal mb-2 font-medium">
+                          {selectedClass?.paymentBank ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">🌟 Học phí này sẽ đóng trực tiếp cho tài khoản của Giáo viên lớp ({selectedClass.name}).</span>
+                          ) : (
+                            <span>💡 Vui lòng mở ứng dụng Ngân hàng di động (Mobile Banking) để quét mã QR thanh toán nhanh hoặc thực hiện chuyển khoản thủ công theo thông tin dưới đây:</span>
+                          )}
+                        </p>
+                        
+                        <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-150 dark:border-slate-800/60 space-y-1.5 font-medium text-slate-700 dark:text-slate-300">
+                          <div>
+                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Ngân hàng</span>
+                            <span className="font-extrabold text-slate-800 dark:text-slate-200">{payBank}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Số tài khoản</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">{payAccountNo}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(payAccountNo);
+                                  alert('Đã sao chép số tài khoản!');
+                                }}
+                                className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer shrink-0"
+                              >
+                                [Sao chép]
+                              </button>
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Tên người thụ hưởng</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{payAccountName}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Nội dung chuyển khoản</span>
+                            <div className="bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg text-[11px] text-amber-700 dark:text-amber-400 font-mono font-bold flex justify-between items-center mt-1">
+                              <span className="select-all">{paymentContentText}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(paymentContentText);
+                                  alert('Đã sao chép nội dung chuyển khoản!');
+                                }}
+                                className="text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer ml-1 shrink-0"
+                              >
+                                [Copy]
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Tên người thụ hưởng</span>
-                        <span className="font-bold text-slate-800 dark:text-slate-200">TRUONG MAM NON BAN MAI</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Nội dung chuyển khoản</span>
-                        <div className="bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg text-[11px] text-amber-700 dark:text-amber-400 font-mono font-bold flex justify-between items-center mt-1">
-                          <span className="select-all">HP NK {selectedStudent.studentCode || 'HS'} {selectedStudent.fullName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase()} T{simulatedMonth.split('-')[1]}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const contentText = `HP NK ${selectedStudent.studentCode || 'HS'} ${selectedStudent.fullName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase()} T${simulatedMonth.split('-')[1]}`;
-                              navigator.clipboard.writeText(contentText);
-                              alert('Đã sao chép nội dung chuyển khoản!');
-                            }}
-                            className="text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer ml-1 shrink-0"
-                          >
-                            [Copy]
-                          </button>
+
+                      <div className="flex flex-col items-center justify-center p-3 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-150 dark:border-slate-800">
+                        <div className="p-3 bg-white rounded-xl shadow-xs border border-slate-100 flex items-center justify-center">
+                          <img
+                            src={`https://img.vietqr.io/image/${bankCode}-${payAccountNo}-compact2.png?amount=${paymentAmount}&addInfo=${encodeURIComponent(paymentContentText)}&accountName=${encodeURIComponent(payAccountName)}`}
+                            alt={`VietQR ${payBank}`}
+                            className="w-48 h-48 object-contain"
+                            referrerPolicy="no-referrer"
+                          />
                         </div>
+                        <span className="text-[10px] text-slate-400 font-extrabold uppercase mt-3 tracking-wider text-center">
+                          Mã VietQR Tự Động Quét
+                        </span>
+                        <span className="text-[9px] text-slate-400 text-center mt-1">
+                          Mở ứng dụng Ngân hàng của bạn để quét mã
+                        </span>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="flex flex-col items-center justify-center p-3 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-150 dark:border-slate-800">
-                    <div className="p-3 bg-white rounded-xl shadow-xs border border-slate-100 flex items-center justify-center">
-                      <img
-                        src={`https://img.vietqr.io/image/VCB-1023456789-compact2.png?amount=${paymentAmount}&addInfo=${encodeURIComponent(`HP NK ${selectedStudent.studentCode || 'HS'} ${selectedStudent.fullName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase()} T${simulatedMonth.split('-')[1]}`)}&accountName=TRUONG%20MAM%20NON%20BAN%20MAI`}
-                        alt="VietQR Vietcombank"
-                        className="w-48 h-48 object-contain"
-                        referrerPolicy="no-referrer"
-                      />
+                  ) : (
+                    <div className="p-5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl text-center space-y-3">
+                      <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-xl">
+                        💵
+                      </div>
+                      <div className="space-y-1 max-w-sm mx-auto">
+                        <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 block">Hướng Dẫn Thanh Toán Tiền Mặt</span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
+                          Phụ huynh vui lòng nộp tiền mặt trực tiếp tại <strong>Phòng Kế toán của nhà trường</strong> hoặc gửi trực tiếp cho <strong>Giáo viên chủ nhiệm lớp</strong> của con trước ngày <strong>10 hàng tháng</strong>.
+                        </p>
+                        <p className="text-[10px] text-slate-400 italic">
+                          *Nhà trường hoặc Giáo viên lớp sẽ ghi nhận trạng thái đã đóng và gửi biên lai xác nhận ngay khi nhận được tiền mặt.
+                        </p>
+                      </div>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-extrabold uppercase mt-3 tracking-wider text-center">
-                      Mã VietQR Tự Động Quét
-                    </span>
-                    <span className="text-[9px] text-slate-400 text-center mt-1">
-                      Mở ứng dụng Ngân hàng của bạn để quét mã
-                    </span>
-                  </div>
+                  )}
                 </div>
-              ) : (
-                <div className="p-5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl text-center space-y-3">
-                  <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-xl">
-                    💵
-                  </div>
-                  <div className="space-y-1 max-w-sm mx-auto">
-                    <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 block">Hướng Dẫn Thanh Toán Tiền Mặt</span>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                      Phụ huynh vui lòng nộp tiền mặt trực tiếp tại <strong>Phòng Kế toán của nhà trường</strong> hoặc gửi trực tiếp cho <strong>Giáo viên chủ nhiệm lớp</strong> của con trước ngày <strong>10 hàng tháng</strong>.
-                    </p>
-                    <p className="text-[10px] text-slate-400 italic">
-                      *Nhà trường sẽ in biên lai phiếu thu và gửi về ví cho phụ huynh sau khi nhận đủ tiền học phí mầm non & năng khiếu của bé.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
+              );
+            })()}
 
-            <div className="flex justify-between items-center pt-3 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 font-semibold leading-normal">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 font-semibold leading-normal">
               <span className="flex items-center gap-1">
                 🛡️ Hệ thống thanh toán bảo mật mầm non
               </span>
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsPaymentModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition text-xs cursor-pointer"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmPaymentSent}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl uppercase shadow-md transition text-xs cursor-pointer flex items-center gap-1"
+                >
+                  <span>Tôi đã chuyển khoản / đóng tiền</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {session && (
+        <ChangePasswordModal
+          isOpen={isChangePasswordOpen}
+          onClose={() => setIsChangePasswordOpen(false)}
+          session={session}
+          settings={settings}
+        />
+      )}
+
+      {selectedEventDetails && (
+        <div className="fixed inset-0 z-55 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs transition-opacity duration-300"
+            onClick={() => setSelectedEventDetails(null)}
+          />
+          
+          {/* Modal Container */}
+          <div className="relative bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl border border-slate-150 dark:border-slate-800 z-10 space-y-6 max-h-[90vh] overflow-y-auto animate-fade-in">
+            
+            {/* Header / Event Title */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-start gap-4">
+                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-widest ${
+                  selectedEventDetails.type === 'meeting' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
+                  selectedEventDetails.type === 'festival' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
+                  selectedEventDetails.type === 'holiday' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300' :
+                  selectedEventDetails.type === 'health' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300' :
+                  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                }`}>
+                  {
+                    selectedEventDetails.type === 'meeting' ? 'Họp phụ huynh' :
+                    selectedEventDetails.type === 'festival' ? 'Ngày hội sáng tạo' :
+                    selectedEventDetails.type === 'holiday' ? 'Lịch nghỉ lễ' :
+                    selectedEventDetails.type === 'health' ? 'Sức khỏe học đường' :
+                    'Phát triển thể chất'
+                  }
+                </span>
+                
+                <button
+                  type="button"
+                  onClick={() => setSelectedEventDetails(null)}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer transition"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              
+              <h3 className="text-base md:text-lg font-extrabold text-slate-900 dark:text-white leading-snug">
+                {selectedEventDetails.title}
+              </h3>
+            </div>
+
+            {/* Time / Location / Calendar details list */}
+            <div className="bg-slate-55 dark:bg-slate-850 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3 font-medium text-xs text-slate-700 dark:text-slate-300">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl">
+                  <Calendar size={16} />
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[10px] block uppercase font-bold tracking-wider">Ngày diễn ra</span>
+                  <strong className="text-slate-800 dark:text-slate-200">{new Date(selectedEventDetails.date).toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                </div>
+              </div>
+
+              {selectedEventDetails.time && (
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-xl">
+                    <Clock size={16} />
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block uppercase font-bold tracking-wider">Thời gian chi tiết</span>
+                    <strong className="text-slate-800 dark:text-slate-200">{selectedEventDetails.time}</strong>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl">
+                  <MapPin size={16} />
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[10px] block uppercase font-bold tracking-wider">Địa điểm</span>
+                  <strong className="text-slate-800 dark:text-slate-200">{selectedEventDetails.location}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Event Description */}
+            <div className="space-y-2">
+              <span className="text-slate-400 text-[10px] block uppercase font-bold tracking-wider">Chi tiết nội dung sự kiện</span>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                {selectedEventDetails.description}
+              </p>
+            </div>
+
+            {/* Important Notes */}
+            {selectedEventDetails.note && (
+              <div className="p-4 bg-rose-500/5 border border-rose-100 dark:border-rose-950/30 rounded-2xl flex items-start gap-3">
+                <span className="text-lg">💡</span>
+                <div className="space-y-1">
+                  <span className="text-rose-700 dark:text-rose-400 text-[10px] uppercase font-extrabold tracking-wider block">Lưu ý quan trọng cho phụ huynh</span>
+                  <p className="text-xs text-rose-600 dark:text-rose-300 font-semibold leading-relaxed">
+                    {selectedEventDetails.note}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* RSVP status interactive footer inside modal */}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <div className="w-full sm:w-auto">
+                {selectedEventDetails.type === 'holiday' ? (
+                  <span className="text-[11px] font-bold text-rose-500 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 px-3 py-1.5 rounded-xl block text-center sm:text-left">
+                    🏖️ Lịch nghỉ lễ chính thức của toàn trường
+                  </span>
+                ) : (
+                  (() => {
+                    const rsvpKey = `${selectedEventDetails.id}_${session.parentPhone || 'anonymous'}`;
+                    const rsvpStatus = eventRsvps[rsvpKey] || 'not_set';
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-slate-400 font-bold block shrink-0 text-[10px] uppercase">Xác nhận:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRsvpChange(selectedEventDetails.id, 'going')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            rsvpStatus === 'going'
+                              ? 'bg-emerald-500 text-white shadow-xs'
+                              : 'bg-slate-150 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          <Check size={12} /> Sẽ tham gia
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRsvpChange(selectedEventDetails.id, 'cant')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                            rsvpStatus === 'cant'
+                              ? 'bg-rose-500 text-white shadow-xs'
+                              : 'bg-slate-150 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          <X size={12} /> Không tham gia
+                        </button>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+
               <button
                 type="button"
-                onClick={() => setIsPaymentModalOpen(false)}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl uppercase shadow-md transition text-xs cursor-pointer"
+                onClick={() => setSelectedEventDetails(null)}
+                className="w-full sm:w-auto px-5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition text-xs cursor-pointer text-center"
               >
-                Hoàn tất & Đóng
+                Đóng
               </button>
             </div>
+
           </div>
         </div>
       )}

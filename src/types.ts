@@ -9,6 +9,7 @@ export interface TalentSubject {
   fee: number;
   schedule?: string;  // Lịch học (ví dụ: "Thứ Hai, Thứ Tư")
   timeSlot?: string;  // Giờ học (ví dụ: "16:30 - 17:30")
+  isMandatory?: boolean; // Môn học bắt buộc học
 }
 
 export interface Classroom {
@@ -19,6 +20,10 @@ export interface Classroom {
   talentFee?: number;     // Tổng học phí năng khiếu
   talentSubjects?: TalentSubject[]; // Danh sách các môn học năng khiếu
   createdBy?: string;    // Số điện thoại giáo viên tạo hoặc 'admin'
+  coTeachers?: string[]; // Danh sách số điện thoại đồng giáo viên cùng quản lý lớp
+  paymentBank?: string;       // Ngân hàng thanh toán (ví dụ: Vietcombank)
+  paymentAccountNo?: string;  // Số tài khoản thanh toán của GV
+  paymentAccountName?: string; // Tên chủ tài khoản thanh toán của GV
 }
 
 export type Gender = 'Nam' | 'Nữ' | 'Khác';
@@ -41,8 +46,11 @@ export interface Student {
   faceEmbedding?: number[]; // Lưu trữ tọa độ mốc hoặc vector đặc trưng mô phỏng
   faceImage?: string; // Ảnh khuôn mặt đã đăng ký (Data URL)
   talentFee?: number; // Học phí năng khiếu riêng biệt (nếu có)
+  otherFee?: number; // Phí khác nếu có trong tháng
+  otherFeeDescription?: string; // Mô tả các khoản phí khác
   registeredTalentSubjects?: string[]; // ID các môn học năng khiếu học sinh đăng ký
   talentFeePaid?: boolean; // Trạng thái đóng học phí năng khiếu (true: đã đóng, false/undefined: chưa đóng)
+  paymentMethod?: string; // Hình thức thanh toán (Chuyển khoản, Tiền mặt)
   talentFeeDueDate?: string; // Hạn đóng học phí năng khiếu (YYYY-MM-DD)
   quickNotes?: string; // Ghi chú nhanh tình hình bé trong ngày
   talentLastRegisteredMonth?: string; // Tháng cuối đăng ký/cập nhật môn năng khiếu (YYYY-MM)
@@ -182,11 +190,44 @@ export interface TeacherNotification {
   className: string;
   parentPhone: string;
   parentName: string;
-  type: 'talent_register' | 'talent_change';
+  type: 'talent_register' | 'talent_change' | 'absence_request' | 'fee_payment';
   content: string;
   createdAt: string;
   read?: boolean;
+  isRead?: boolean;
 }
+
+export interface SchoolEvent {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time?: string;
+  description: string;
+  location: string;
+  type: 'meeting' | 'festival' | 'holiday' | 'health' | 'sports';
+  note?: string;
+}
+
+export interface ClassActivity {
+  id: string;
+  classId: string;
+  date: string; // YYYY-MM-DD
+  time: string; // e.g. "07:30 - 08:15"
+  title: string;
+  completed: boolean;
+}
+
+export interface ParentNotification {
+  id: string;
+  classId: string;
+  className: string;
+  type: 'activity_create' | 'activity_update' | 'activity_delete';
+  title: string;
+  content: string;
+  createdAt: string;
+  isRead: boolean;
+}
+
 
 
 

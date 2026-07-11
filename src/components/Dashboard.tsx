@@ -19,9 +19,11 @@ import {
   Bell,
   Trash2,
   BookOpen,
-  Check
+  Check,
+  Plus,
+  X
 } from 'lucide-react';
-import { Classroom, Student, AttendanceRecord, SchoolSettings, AbsenceReport, TeacherNotification } from '../types';
+import { Classroom, Student, AttendanceRecord, SchoolSettings, AbsenceReport, TeacherNotification, SchoolEvent } from '../types';
 import { StorageService } from '../utils/storage';
 
 interface DashboardProps {
@@ -55,6 +57,83 @@ export default function Dashboard({
   React.useEffect(() => {
     setNotifications(StorageService.getTeacherNotifications());
   }, []);
+
+  // --- SCHOOL EVENTS & HOLIDAYS STATE & HANDLERS ---
+  const [events, setEvents] = React.useState<SchoolEvent[]>([]);
+  const [isEventModalOpen, setIsEventModalOpen] = React.useState(false);
+  const [editingEvent, setEditingEvent] = React.useState<SchoolEvent | null>(null);
+  
+  const [eventForm, setEventForm] = React.useState<Partial<SchoolEvent>>({
+    title: '',
+    date: '',
+    time: '',
+    description: '',
+    location: '',
+    type: 'meeting',
+    note: ''
+  });
+
+  React.useEffect(() => {
+    setEvents(StorageService.getSchoolEvents());
+  }, []);
+
+  const handleOpenAddEvent = () => {
+    setEditingEvent(null);
+    setEventForm({
+      title: '',
+      date: new Date().toISOString().split('T')[0],
+      time: '08:00 - 11:00',
+      description: '',
+      location: '',
+      type: 'meeting',
+      note: ''
+    });
+    setIsEventModalOpen(true);
+  };
+
+  const handleOpenEditEvent = (evt: SchoolEvent) => {
+    setEditingEvent(evt);
+    setEventForm({ ...evt });
+    setIsEventModalOpen(true);
+  };
+
+  const handleDeleteEvent = (id: string) => {
+    if (confirm('Bạn có chắc chắn muốn xóa sự kiện này?')) {
+      const updated = events.filter(e => e.id !== id);
+      setEvents(updated);
+      StorageService.saveSchoolEvents(updated);
+    }
+  };
+
+  const handleSaveEvent = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!eventForm.title || !eventForm.date || !eventForm.description || !eventForm.location) {
+      alert('Vui lòng điền đầy đủ các thông tin bắt buộc: Tên sự kiện, Ngày tổ chức, Nội dung và Địa điểm.');
+      return;
+    }
+
+    let updatedEvents: SchoolEvent[] = [];
+    if (editingEvent) {
+      updatedEvents = events.map(evt => evt.id === editingEvent.id ? { ...evt, ...eventForm } as SchoolEvent : evt);
+    } else {
+      const newEvent: SchoolEvent = {
+        id: `evt_${Date.now()}`,
+        title: eventForm.title || '',
+        date: eventForm.date || '',
+        time: eventForm.time || '',
+        description: eventForm.description || '',
+        location: eventForm.location || '',
+        type: (eventForm.type as any) || 'meeting',
+        note: eventForm.note || ''
+      };
+      updatedEvents = [...events, newEvent];
+    }
+
+    setEvents(updatedEvents);
+    StorageService.saveSchoolEvents(updatedEvents);
+    setIsEventModalOpen(false);
+    setEditingEvent(null);
+  };
 
   const handleMarkAsRead = (id: string) => {
     const updated = notifications.map(n => n.id === id ? { ...n, isRead: true } : n);
@@ -147,7 +226,7 @@ export default function Dashboard({
     let totalStudentsWithTalent = 0;
 
     students.forEach(s => {
-      const fee = s.talentFee || 0;
+      const fee = (s.talentFee || 0) + (s.otherFee || 0);
       if (fee > 0) {
         totalStudentsWithTalent++;
         totalRegistered += fee;
@@ -180,7 +259,8 @@ export default function Dashboard({
     today.setHours(0, 0, 0, 0);
 
     return students.filter(s => {
-      if (s.talentFeePaid || !s.talentFee || s.talentFee <= 0 || !s.talentFeeDueDate) {
+      const totalFee = (s.talentFee || 0) + (s.otherFee || 0);
+      if (s.talentFeePaid || totalFee <= 0 || !s.talentFeeDueDate) {
         return false;
       }
       const dueDate = new Date(s.talentFeeDueDate);
@@ -408,7 +488,7 @@ export default function Dashboard({
                         <span className="font-bold text-slate-800 dark:text-slate-200">{student.fullName}</span>
                         <span className="text-slate-400">({classroom?.name || 'Chưa rõ lớp'})</span>
                         <span className="text-rose-600 dark:text-rose-400 font-bold font-mono">
-                          {((student.talentFee || 0).toLocaleString('vi-VN'))} đ
+                          {(((student.talentFee || 0) + (student.otherFee || 0)).toLocaleString('vi-VN'))} đ
                         </span>
                         <span className="bg-red-500/10 text-red-600 dark:text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full">
                           Quá hạn {diffDays} ngày (Hạn: {student.talentFeeDueDate})
@@ -846,6 +926,275 @@ export default function Dashboard({
           </div>
         </div>
       </div>
+
+      {/* SECTION: SCHOOL EVENTS & HOLIDAYS MANAGEMENT */}
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-150 dark:border-slate-800 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <CalendarDays className={getThemeColorClass('text')} size={20} />
+              Quản Lý Sự Kiện & Ngày Lễ Sắp Tới ({events.length})
+            </h2>
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              Giáo viên thêm, sửa, xóa các ngày lễ nghỉ học, họp phụ huynh, ngày hội thiếu nhi hiển thị trực quan lên Dashboard cả hệ thống.
+            </p>
+          </div>
+          
+          <button
+            type="button"
+            onClick={handleOpenAddEvent}
+            className={`px-4 py-2.5 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer ${getThemeColorClass('bg')}`}
+          >
+            <Plus size={14} />
+            <span>Thêm sự kiện mới</span>
+          </button>
+        </div>
+
+        {events.length === 0 ? (
+          <div className="text-center py-10 text-slate-400 text-xs flex flex-col items-center justify-center gap-2 border border-dashed border-slate-200 dark:border-slate-850 rounded-xl">
+            <span className="text-2xl">📅</span>
+            <p>Chưa có sự kiện nào được tạo. Hãy nhấn "Thêm sự kiện mới".</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {events.map((event) => {
+              let badgeBg = 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300';
+              let badgeText = 'Sự kiện';
+              let headerBg = 'bg-indigo-50 border-indigo-100 dark:bg-indigo-950/20 dark:border-indigo-900/30';
+
+              if (event.type === 'meeting') {
+                badgeBg = 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
+                badgeText = 'Họp phụ huynh';
+                headerBg = 'bg-purple-50 border-purple-100 dark:bg-purple-950/20 dark:border-purple-900/30';
+              } else if (event.type === 'festival') {
+                badgeBg = 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+                badgeText = 'Ngày hội';
+                headerBg = 'bg-amber-50 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/30';
+              } else if (event.type === 'holiday') {
+                badgeBg = 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300';
+                badgeText = 'Nghỉ lễ';
+                headerBg = 'bg-rose-50 border-rose-100 dark:bg-rose-950/20 dark:border-rose-900/30';
+              } else if (event.type === 'health') {
+                badgeBg = 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300';
+                badgeText = 'Sức khỏe';
+                headerBg = 'bg-teal-50 border-teal-100 dark:bg-teal-950/20 dark:border-teal-900/30';
+              } else if (event.type === 'sports') {
+                badgeBg = 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
+                badgeText = 'Thể thao';
+                headerBg = 'bg-emerald-50 border-emerald-100 dark:bg-emerald-950/20 dark:border-emerald-900/30';
+              }
+
+              return (
+                <div 
+                  key={event.id}
+                  className={`p-4 rounded-xl border flex flex-col justify-between gap-3 ${headerBg}`}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${badgeBg}`}>
+                        {badgeText}
+                      </span>
+                      <span className="text-[11px] font-bold text-slate-500 font-mono flex items-center gap-1">
+                        📅 {event.date} {event.time && `• ⏰ ${event.time}`}
+                      </span>
+                    </div>
+
+                    <h3 className="font-extrabold text-xs text-slate-800 dark:text-white uppercase tracking-tight">
+                      {event.title}
+                    </h3>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                      {event.description}
+                    </p>
+
+                    <div className="space-y-1 pt-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                      <div className="flex items-start gap-1">
+                        <span className="text-slate-400 font-bold">📍 Địa điểm:</span>
+                        <span>{event.location}</span>
+                      </div>
+                      {event.note && (
+                        <div className="flex items-start gap-1">
+                          <span className="text-rose-500 dark:text-rose-400 font-bold">⚠️ Lưu ý:</span>
+                          <span className="text-slate-500 dark:text-slate-400 italic">{event.note}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-200/40 dark:border-slate-700/40">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditEvent(event)}
+                      className="px-2.5 py-1.5 bg-white/80 dark:bg-slate-850 hover:bg-white dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg transition border border-slate-200/40 dark:border-slate-700/65 cursor-pointer text-[11px] flex items-center gap-1 font-bold"
+                    >
+                      <Plus size={11} className="rotate-45" />
+                      <span>Sửa</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteEvent(event.id)}
+                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg transition border border-transparent cursor-pointer text-[11px] flex items-center gap-1 font-bold"
+                    >
+                      <Trash2 size={11} />
+                      <span>Xóa</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* EVENT EDIT/ADD MODAL DIALOG */}
+      {isEventModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-lg w-full overflow-hidden"
+          >
+            <div className={`p-4 flex items-center justify-between text-white ${getThemeColorClass('bg')}`}>
+              <h3 className="font-extrabold text-sm uppercase tracking-wider flex items-center gap-2">
+                <CalendarDays size={18} />
+                <span>{editingEvent ? 'Cập Nhật Sự Kiện' : 'Thêm Sự Kiện Mới'}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsEventModalOpen(false)}
+                className="text-white hover:text-slate-200 cursor-pointer p-1 rounded-lg hover:bg-white/10"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEvent} className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Tên sự kiện */}
+                <div className="col-span-2 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Tên sự kiện <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={eventForm.title || ''}
+                    onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                    placeholder="Ví dụ: Họp Phụ Huynh Đầu Năm"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Phân loại */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Phân loại sự kiện <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={eventForm.type || 'meeting'}
+                    onChange={(e) => setEventForm({ ...eventForm, type: e.target.value as any })}
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="meeting">Họp phụ huynh</option>
+                    <option value="festival">Ngày hội cho bé</option>
+                    <option value="holiday">Nghỉ lễ/Tết</option>
+                    <option value="health">Kiểm tra sức khỏe</option>
+                    <option value="sports">Thể dục thể thao</option>
+                  </select>
+                </div>
+
+                {/* Ngày diễn ra */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Ngày tổ chức <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={eventForm.date || ''}
+                    onChange={(e) => setEventForm({ ...eventForm, date: e.target.value })}
+                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Khung giờ */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Khung giờ (Tùy chọn)
+                  </label>
+                  <input
+                    type="text"
+                    value={eventForm.time || ''}
+                    onChange={(e) => setEventForm({ ...eventForm, time: e.target.value })}
+                    placeholder="Ví dụ: 08:30 - 11:00 hoặc Cả ngày"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Địa điểm */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Địa điểm <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={eventForm.location || ''}
+                    onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
+                    placeholder="Ví dụ: Phòng Y tế hoặc Sân trường"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Mô tả chi tiết */}
+                <div className="col-span-2 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Nội dung sự kiện <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={eventForm.description || ''}
+                    onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
+                    placeholder="Nhập chi tiết nội dung sự kiện cho phụ huynh theo dõi..."
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500 resize-none"
+                  />
+                </div>
+
+                {/* Ghi chú */}
+                <div className="col-span-2 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Lưu ý thêm (Tùy chọn)
+                  </label>
+                  <input
+                    type="text"
+                    value={eventForm.note || ''}
+                    onChange={(e) => setEventForm({ ...eventForm, note: e.target.value })}
+                    placeholder="Ví dụ: Phụ huynh vui lòng đưa trẻ đi đúng giờ"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsEventModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  className={`px-4 py-2 text-white font-bold rounded-xl text-xs transition cursor-pointer ${getThemeColorClass('bg')}`}
+                >
+                  {editingEvent ? 'Lưu thay đổi' : 'Tạo sự kiện'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
 
       {/* SECTION: TEACHER NOTIFICATIONS FOR TALENT REGISTRATION */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-150 dark:border-slate-800 shadow-xs space-y-4">

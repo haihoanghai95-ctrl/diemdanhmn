@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   GraduationCap,
@@ -19,9 +19,12 @@ import {
   Menu,
   Contact,
   Utensils,
-  Heart
+  Heart,
+  ClipboardCheck,
+  KeyRound
 } from 'lucide-react';
 import { SchoolSettings, UserSession } from '../types';
+import ChangePasswordModal from './ChangePasswordModal';
 
 interface SidebarProps {
   currentTab: string;
@@ -48,6 +51,7 @@ export default function Sidebar({
   setMobileOpen,
   overdueCount,
 }: SidebarProps) {
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   
   const menuItems = [
     { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
@@ -57,6 +61,7 @@ export default function Sidebar({
     { id: 'health', label: 'Sức khỏe học sinh', icon: Heart },
     { id: 'attendance', label: 'Điểm danh Camera', icon: Camera, badge: 'AI Live' },
     { id: 'history', label: 'Lịch sử điểm danh', icon: History },
+    { id: 'assessments', label: 'Đánh giá trẻ hằng ngày', icon: ClipboardCheck },
     { id: 'reports', label: 'Báo cáo thống kê', icon: BarChart3 },
     { id: 'menu', label: 'Đăng thực đơn', icon: Utensils },
     { id: 'settings', label: 'Cài đặt hệ thống', icon: Settings },
@@ -233,6 +238,24 @@ export default function Sidebar({
           </div>
         )}
         
+        {session && (
+          <button
+            id="sidebar-change-password-btn"
+            onClick={() => setIsChangePasswordOpen(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800/50 transition-all duration-200 cursor-pointer mb-1.5"
+          >
+            <KeyRound size={18} className="shrink-0" />
+            <span className={`transition-all duration-300 ${collapsed ? 'md:opacity-0 md:w-0 md:overflow-hidden' : 'opacity-100 w-auto'}`}>
+              Đổi mật khẩu
+            </span>
+            {collapsed && (
+              <div className="absolute left-16 px-2 py-1 bg-slate-900 text-white text-xs font-normal rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 shadow-md whitespace-nowrap">
+                Đổi mật khẩu
+              </div>
+            )}
+          </button>
+        )}
+        
         <button
           id="sidebar-logout-btn"
           onClick={onLogout}
@@ -281,6 +304,15 @@ export default function Sidebar({
             {sidebarContent}
           </div>
         </div>
+      )}
+
+      {session && (
+        <ChangePasswordModal
+          isOpen={isChangePasswordOpen}
+          onClose={() => setIsChangePasswordOpen(false)}
+          session={session}
+          settings={settings}
+        />
       )}
     </>
   );

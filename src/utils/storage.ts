@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, ParentAccount, WeeklyMenu, AbsenceReport, TeacherAccount, HealthRecord, DailyAssessment, TeacherNotification } from '../types';
+import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, ParentAccount, WeeklyMenu, AbsenceReport, TeacherAccount, HealthRecord, DailyAssessment, TeacherNotification, SchoolEvent, ClassActivity, ParentNotification } from '../types';
 import { generateMockEmbedding } from './faceSim';
 import {
   saveSettingsToFirebase,
@@ -37,7 +37,10 @@ const KEYS = {
   ABSENCE_REPORTS: 'sma_absence_reports',
   HEALTH_RECORDS: 'sma_health_records',
   DAILY_ASSESSMENTS: 'sma_daily_assessments',
+  DAILY_COMMENTS: 'sma_daily_comments',
   TEACHER_NOTIFICATIONS: 'sma_teacher_notifications',
+  PARENT_NOTIFICATIONS: 'sma_parent_notifications',
+  EVENTS: 'sma_school_events',
 };
 
 // Thực đơn tuần mầm non mặc định
@@ -207,7 +210,7 @@ const INITIAL_STUDENTS = (classrooms: Classroom[]): Student[] => [
     registeredTalentSubjects: ['t1_1'],
     talentFee: 300000,
     talentFeePaid: false,
-    talentFeeDueDate: '2026-07-01' // Quá hạn hơn 3 ngày so với 2026-07-08
+    talentFeeDueDate: '2026-07-10' // Hạn ngày 10 hàng tháng
   },
   {
     id: 's2',
@@ -225,7 +228,7 @@ const INITIAL_STUDENTS = (classrooms: Classroom[]): Student[] => [
     registeredTalentSubjects: ['t1_2'],
     talentFee: 200000,
     talentFeePaid: true,
-    talentFeeDueDate: '2026-07-01'
+    talentFeeDueDate: '2026-07-10'
   },
   {
     id: 's3',
@@ -888,6 +891,15 @@ export class StorageService {
     saveAttendanceToFirebase(attendance).catch(handleSyncCatch);
   }
 
+  // --- ADMIN PASSWORD ---
+  public static getAdminPassword(): string {
+    return localStorage.getItem('sma_admin_password') || 'admin123';
+  }
+
+  public static saveAdminPassword(password: string) {
+    localStorage.setItem('sma_admin_password', password);
+  }
+
   // --- SESSION ---
   public static getSession(): UserSession | null {
     try {
@@ -1016,5 +1028,154 @@ export class StorageService {
 
   public static saveTeacherNotifications(notifications: TeacherNotification[]) {
     localStorage.setItem(KEYS.TEACHER_NOTIFICATIONS, JSON.stringify(notifications));
+  }
+
+  // --- DAILY COMMENTS / REVIEWS ---
+  public static getDailyComments(): Record<string, { rating: number; text: string }> {
+    this.initialize();
+    try {
+      const data = localStorage.getItem(KEYS.DAILY_COMMENTS);
+      if (!data) {
+        return {
+          'std_1': { rating: 5, text: 'Học tập hăng say, ăn hết suất ăn trưa nhanh nhẹn.' },
+          'std_2': { rating: 4, text: 'Ngoan ngoãn nghe lời cô, hơi buồn ngủ vào đầu buổi xế.' },
+          'std_3': { rating: 5, text: 'Năng nổ tham gia hoạt động múa hát thể thao cùng các bạn.' }
+        };
+      }
+      return JSON.parse(data);
+    } catch {
+      return {};
+    }
+  }
+
+  public static saveDailyComments(comments: Record<string, { rating: number; text: string }>) {
+    localStorage.setItem(KEYS.DAILY_COMMENTS, JSON.stringify(comments));
+  }
+
+  // --- SCHOOL EVENTS & HOLIDAYS ---
+  public static getSchoolEvents(): SchoolEvent[] {
+    this.initialize();
+    try {
+      const data = localStorage.getItem(KEYS.EVENTS);
+      if (!data) {
+        const fallback: SchoolEvent[] = [
+          {
+            id: 'evt_1',
+            title: 'Họp Phụ Huynh Học Kỳ I',
+            date: '2026-07-16',
+            time: '08:30 - 11:00',
+            description: 'Gặp gỡ giáo viên chủ nhiệm, thảo luận về chương trình học bán trú, hoạt động dã ngoại và định hướng chăm sóc giáo dục bé trong học kỳ mới.',
+            location: 'Phòng sinh hoạt lớp chủ nhiệm của bé',
+            type: 'meeting',
+            note: 'Phụ huynh vui lòng đi đúng giờ và không dẫn theo các bé để buổi họp diễn ra tập trung nhất.'
+          },
+          {
+            id: 'evt_2',
+            title: 'Ngày Hội Đọc Sách & Sáng Tạo',
+            date: '2026-07-22',
+            time: '08:00 - 16:00',
+            description: 'Bé tham gia trải nghiệm đọc sách tranh tương tác, thiết kế dấu trang sách (bookmark) xinh xắn và tham gia vẽ tranh cát sáng tạo cùng cô giáo.',
+            location: 'Sân trường chính & Thư viện sách thiếu nhi',
+            type: 'festival',
+            note: 'Nhà trường khuyến khích phụ huynh tặng 1 cuốn sách cũ cho thư viện của trường để nhân rộng văn hóa đọc.'
+          },
+          {
+            id: 'evt_3',
+            title: 'Kỷ Niệm Ngày 27/7 (Học sinh nghỉ học)',
+            date: '2026-07-27',
+            time: 'Cả ngày',
+            description: 'Nghỉ lễ tri ân ngày Thương binh - Liệt sĩ. Trường nghỉ dạy 01 ngày theo quy định nhà nước.',
+            location: 'Nghỉ tại nhà',
+            type: 'holiday',
+            note: 'Các con nghỉ học và sinh hoạt tại gia dịch. Thứ Ba ngày 28/7 trường đón các con đi học bình thường.'
+          },
+          {
+            id: 'evt_4',
+            title: 'Kiểm Tra Sức Khỏe & Răng Miệng Định Kỳ',
+            date: '2026-08-04',
+            time: '08:00 - 11:30',
+            description: 'Đội ngũ bác sĩ từ bệnh viện Nhi đồng đến khám tai mũi họng, kiểm tra răng miệng, đo thị lực và đánh giá thể lực phát triển định kỳ cho các con.',
+            location: 'Phòng Y tế trường',
+            type: 'health',
+            note: 'Phụ huynh cập nhật sổ theo dõi sức khỏe của con tại ứng dụng sau khi có kết quả từ bác sĩ.'
+          },
+          {
+            id: 'evt_5',
+            title: 'Ngày Hội Thể Thao "Little Olympics 2026"',
+            date: '2026-08-15',
+            time: '07:30 - 10:30',
+            description: 'Sự kiện thể thao ngoài trời bùng nổ năng lượng cho các bé: Chạy tiếp sức, kéo co, nhảy bao bố và vượt chướng ngại vật liên hoàn.',
+            location: 'Sân vận động thể chất ngoài trời của trường',
+            type: 'sports',
+            note: 'Phụ huynh vui lòng trang bị cho bé giày thể thao mềm, mũ che nắng và mặc đồng phục thể thao của trường.'
+          }
+        ];
+        localStorage.setItem(KEYS.EVENTS, JSON.stringify(fallback));
+        return fallback;
+      }
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveSchoolEvents(events: SchoolEvent[]) {
+    localStorage.setItem(KEYS.EVENTS, JSON.stringify(events));
+  }
+
+  // --- CLASSROOM DYNAMIC ACTIVITIES ---
+  public static getClassActivities(): ClassActivity[] {
+    this.initialize();
+    try {
+      const data = localStorage.getItem('sma_class_activities');
+      if (!data) {
+        const fallback: ClassActivity[] = [
+          // Activities for Class c1 (12A1) on 2026-07-11
+          { id: 'act_1_1', classId: 'c1', date: '2026-07-11', time: '07:30 - 08:15', title: 'Đón trẻ & Tập thể dục buổi sáng ☀️', completed: true },
+          { id: 'act_1_2', classId: 'c1', date: '2026-07-11', time: '08:15 - 09:30', title: 'Hoạt động học tập mầm non (Vẽ tranh đất nặn) 🎨', completed: true },
+          { id: 'act_1_3', classId: 'c1', date: '2026-07-11', time: '09:30 - 10:30', title: 'Vui chơi ngoài trời, khám phá thiên nhiên 🌿', completed: true },
+          { id: 'act_1_4', classId: 'c1', date: '2026-07-11', time: '10:30 - 11:30', title: 'Vệ sinh cá nhân & Bữa trưa ngon miệng 🍲', completed: false },
+          { id: 'act_1_5', classId: 'c1', date: '2026-07-11', time: '11:30 - 14:00', title: 'Giấc ngủ trưa yên lành của bé 💤', completed: false },
+          { id: 'act_1_6', classId: 'c1', date: '2026-07-11', time: '14:15 - 15:00', title: 'Ăn xế dinh dưỡng (Uống sữa, bánh ngọt) 🥛', completed: false },
+          { id: 'act_1_7', classId: 'c1', date: '2026-07-11', time: '15:00 - 16:30', title: 'Sinh hoạt tự do, kể chuyện cổ tích & Trả trẻ 🎒', completed: false },
+
+          // Activities for Class c2 (12A2) on 2026-07-11
+          { id: 'act_2_1', classId: 'c2', date: '2026-07-11', time: '07:30 - 08:15', title: 'Đón học sinh & Khởi động ngày mới 🏃‍♂️', completed: true },
+          { id: 'act_2_2', classId: 'c2', date: '2026-07-11', time: '08:15 - 09:30', title: 'Nhận diện hình khối & Tô màu sáng tạo ✏️', completed: true },
+          { id: 'act_2_3', classId: 'c2', date: '2026-07-11', time: '09:30 - 10:30', title: 'Trò chơi dân gian nhảy bao bố ngoài sân 🪵', completed: true },
+          { id: 'act_2_4', classId: 'c2', date: '2026-07-11', time: '10:30 - 11:30', title: 'Rửa tay xà phòng & Ăn trưa bán trú 🍱', completed: true },
+          { id: 'act_2_5', classId: 'c2', date: '2026-07-11', time: '11:30 - 14:00', title: 'Giấc ngủ trưa ngon giấc 😴', completed: false },
+          { id: 'act_2_6', classId: 'c2', date: '2026-07-11', time: '14:15 - 15:00', title: 'Ăn xế chiều (Sữa chua nếp cẩm) 🥛', completed: false },
+          { id: 'act_2_7', classId: 'c2', date: '2026-07-11', time: '15:00 - 16:30', title: 'Xem phim hoạt hình giáo dục & Trả trẻ 🎬', completed: false }
+        ];
+        localStorage.setItem('sma_class_activities', JSON.stringify(fallback));
+        return fallback;
+      }
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveClassActivities(activities: ClassActivity[]) {
+    localStorage.setItem('sma_class_activities', JSON.stringify(activities));
+  }
+
+  // --- PARENT NOTIFICATIONS ---
+  public static getParentNotifications(): ParentNotification[] {
+    this.initialize();
+    try {
+      const data = localStorage.getItem(KEYS.PARENT_NOTIFICATIONS);
+      if (!data) {
+        return [];
+      }
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveParentNotifications(notifications: ParentNotification[]) {
+    localStorage.setItem(KEYS.PARENT_NOTIFICATIONS, JSON.stringify(notifications));
   }
 }

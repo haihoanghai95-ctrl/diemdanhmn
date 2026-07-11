@@ -32,12 +32,44 @@ import {
   Bell,
   Send,
   QrCode,
-  Printer
+  Printer,
+  Check,
+  AlertTriangle
 } from 'lucide-react';
 import { Student, Classroom, Gender, SchoolSettings } from '../types';
 import { generateMockEmbedding } from '../utils/faceSim';
 import { StorageService } from '../utils/storage';
 import { audioService } from '../utils/audio';
+
+const formatMoneyInput = (value: string | number | undefined): string => {
+  if (value === undefined || value === null) return '';
+  const clean = String(value).replace(/\D/g, '');
+  if (!clean) return '';
+  return Number(clean).toLocaleString('vi-VN');
+};
+
+const parseMoneyInput = (value: string): number => {
+  const clean = value.replace(/\D/g, '');
+  return clean ? Number(clean) : 0;
+};
+
+const getDefaultDueDate = (): string => {
+  const now = new Date();
+  let year = now.getFullYear();
+  let month = now.getMonth(); // 0-11
+  
+  // If today's date is past the 10th, default to the 10th of next month
+  if (now.getDate() > 10) {
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  
+  const monthStr = String(month + 1).padStart(2, '0');
+  return `${year}-${monthStr}-10`;
+};
 
 interface StudentsProps {
   students: Student[];
@@ -49,13 +81,43 @@ interface StudentsProps {
 export default function Students({ students, classrooms, saveStudents, settings }: StudentsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [classFilter, setClassFilter] = useState('all');
+  const [monthFilter, setMonthFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
+
+  const uniqueMonths = useMemo(() => {
+    const months = new Set<string>();
+    students.forEach(s => {
+      if (s.talentFeeDueDate) {
+        months.add(s.talentFeeDueDate.slice(0, 7));
+      }
+    });
+    const now = new Date();
+    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    months.add(currentMonthStr);
+    return Array.from(months).sort((a, b) => b.localeCompare(a));
+  }, [students]);
+
+  const formatMonthLabel = (monthStr: string) => {
+    const [year, month] = monthStr.split('-');
+    return `Tháng ${month}/${year}`;
+  };
 
   // Modals / Dialog State
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isBulkFeeOpen, setIsBulkFeeOpen] = useState(false);
+  
+  // Bulk Fee States
+  const [bulkClassFilter, setBulkClassFilter] = useState('all');
+  const [bulkOtherFee, setBulkOtherFee] = useState('');
+  const [bulkOtherFeeDescription, setBulkOtherFeeDescription] = useState('');
+  const [bulkActionType, setBulkActionType] = useState<'overwrite' | 'accumulate'>('overwrite');
+  const [bulkResetPaidStatus, setBulkResetPaidStatus] = useState(true);
+  const [bulkConfirmStep, setBulkConfirmStep] = useState(false);
+  const [bulkError, setBulkError] = useState('');
+  const [bulkSuccessMsg, setBulkSuccessMsg] = useState('');
   
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
@@ -79,7 +141,10 @@ export default function Students({ students, classrooms, saveStudents, settings 
   const [classId, setClassId] = useState('');
   const [registeredSubjects, setRegisteredSubjects] = useState<string[]>([]);
   const [formTalentFeePaid, setFormTalentFeePaid] = useState(false);
-  const [talentFeeDueDate, setTalentFeeDueDate] = useState('');
+  const [formPaymentMethod, setFormPaymentMethod] = useState('Chuyển khoản');
+  const [talentFeeDueDate, setTalentFeeDueDate] = useState(getDefaultDueDate());
+  const [otherFee, setOtherFee] = useState<string>('');
+  const [otherFeeDescription, setOtherFeeDescription] = useState<string>('');
   const [formError, setFormError] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
   const [selectedQRStudent, setSelectedQRStudent] = useState<Student | null>(null);
@@ -154,9 +219,11 @@ export default function Students({ students, classrooms, saveStudents, settings 
       
       const matchClass = classFilter === 'all' || s.classId === classFilter;
       
-      return matchSearch && matchClass;
+      const matchMonth = monthFilter === 'all' || (s.talentFeeDueDate && s.talentFeeDueDate.startsWith(monthFilter));
+      
+      return matchSearch && matchClass && matchMonth;
     });
-  }, [students, searchTerm, classFilter]);
+  }, [students, searchTerm, classFilter, monthFilter]);
 
   // 3. Pagination
   const totalPages = Math.ceil(filteredStudents.length / itemsPerPage) || 1;
@@ -183,9 +250,11 @@ export default function Students({ students, classrooms, saveStudents, settings 
   const handleToggleTalentFeePaid = (studentId: string) => {
     const updated = students.map(s => {
       if (s.id === studentId) {
+        const nextPaid = !s.talentFeePaid;
         return {
           ...s,
-          talentFeePaid: !s.talentFeePaid
+          talentFeePaid: nextPaid,
+          paymentMethod: nextPaid ? (s.paymentMethod || 'Chuyển khoản') : undefined
         };
       }
       return s;
@@ -193,7 +262,11 @@ export default function Students({ students, classrooms, saveStudents, settings 
     saveStudents(updated);
     
     if (selectedStudent && selectedStudent.id === studentId) {
-      setSelectedStudent(prev => prev ? { ...prev, talentFeePaid: !prev.talentFeePaid } : null);
+      setSelectedStudent(prev => prev ? { 
+        ...prev, 
+        talentFeePaid: !prev.talentFeePaid,
+        paymentMethod: !prev.talentFeePaid ? (prev.paymentMethod || 'Chuyển khoản') : undefined
+      } : null);
     }
   };
 
@@ -213,7 +286,10 @@ export default function Students({ students, classrooms, saveStudents, settings 
     setClassId(classrooms[0]?.id || '');
     setRegisteredSubjects([]);
     setFormTalentFeePaid(false);
-    setTalentFeeDueDate('');
+    setFormPaymentMethod('Chuyển khoản');
+    setTalentFeeDueDate(getDefaultDueDate());
+    setOtherFee('');
+    setOtherFeeDescription('');
     setFormError('');
     setQuickNotes('');
     setCapturedImage(null);
@@ -237,7 +313,10 @@ export default function Students({ students, classrooms, saveStudents, settings 
     setClassId(student.classId);
     setRegisteredSubjects(student.registeredTalentSubjects || []);
     setFormTalentFeePaid(!!student.talentFeePaid);
+    setFormPaymentMethod(student.paymentMethod || 'Chuyển khoản');
     setTalentFeeDueDate(student.talentFeeDueDate || '');
+    setOtherFee(formatMoneyInput(student.otherFee));
+    setOtherFeeDescription(student.otherFeeDescription || '');
     setFormError('');
     setQuickNotes(student.quickNotes || '');
     setCapturedImage(student.avatar || null);
@@ -269,8 +348,12 @@ export default function Students({ students, classrooms, saveStudents, settings 
     const dueDateStr = student.talentFeeDueDate 
       ? ` trước ngày ${new Date(student.talentFeeDueDate).toLocaleDateString('vi-VN')}` 
       : '';
+    const totalFee = (student.talentFee || 0) + (student.otherFee || 0);
+    const feeBreakdown = student.otherFee 
+      ? ` (bao gồm học phí năng khiếu: ${student.talentFee?.toLocaleString('vi-VN')} đ và phí khác: ${student.otherFee?.toLocaleString('vi-VN')} đ)` 
+      : '';
     setReminderMessage(
-      `Kính gửi phụ huynh bé ${student.fullName}, trường Mầm non ${settings.schoolName || 'Smart'} xin thông báo nhắc nhở đóng học phí năng khiếu tháng này của bé là ${student.talentFee?.toLocaleString('vi-VN')} đ${dueDateStr}. Kính mong phụ huynh hoàn thành đóng học phí đúng hạn. Xin chân thành cảm ơn!`
+      `Kính gửi phụ huynh bé ${student.fullName}, trường Mầm non ${settings.schoolName || 'Smart'} xin thông báo nhắc nhở đóng học phí tháng này của bé là ${totalFee.toLocaleString('vi-VN')} đ${feeBreakdown}${dueDateStr}. Kính mong phụ huynh hoàn thành đóng học phí đúng hạn. Xin chân thành cảm ơn!`
     );
     setReminderSuccess(false);
     setIsReminderOpen(true);
@@ -446,8 +529,11 @@ export default function Students({ students, classrooms, saveStudents, settings 
         faceImage: capturedImage || undefined,
         faceEmbedding: finalEmbedding || generateMockEmbedding(fullName.trim()),
         talentFee: calculatedTalentFee,
+        otherFee: parseMoneyInput(otherFee) || undefined,
+        otherFeeDescription: otherFeeDescription.trim() || undefined,
         registeredTalentSubjects: registeredSubjects,
         talentFeePaid: formTalentFeePaid,
+        paymentMethod: formPaymentMethod,
         talentFeeDueDate: talentFeeDueDate || undefined,
         quickNotes: quickNotes.trim() || undefined,
       };
@@ -472,8 +558,11 @@ export default function Students({ students, classrooms, saveStudents, settings 
             faceImage: capturedImage || s.faceImage,
             faceEmbedding: finalEmbedding || s.faceEmbedding,
             talentFee: calculatedTalentFee,
+            otherFee: parseMoneyInput(otherFee) || undefined,
+            otherFeeDescription: otherFeeDescription.trim() || undefined,
             registeredTalentSubjects: registeredSubjects,
             talentFeePaid: formTalentFeePaid,
+            paymentMethod: formPaymentMethod,
             talentFeeDueDate: talentFeeDueDate || undefined,
             quickNotes: quickNotes.trim() || undefined,
           };
@@ -488,6 +577,407 @@ export default function Students({ students, classrooms, saveStudents, settings 
   };
 
   // --- EXCEL/CSV IMPORT & EXPORT ---
+  
+  // Export fee payments to Excel (Tuition & Other fees)
+  const handleExportFeePaymentsExcel = () => {
+    try {
+      const dataRows = [
+        [
+          'Mã Học Sinh',
+          'Họ và Tên',
+          'Lớp',
+          'Môn Học Đăng Ký',
+          'Học Phí Năng Khiếu (đ)',
+          'Các Phí Khác (đ)',
+          'Nội Dung Phí Khác',
+          'Tổng Tiền (đ)',
+          'Trạng Thái',
+          'Hình Thức Thanh Toán'
+        ]
+      ];
+
+      filteredStudents.forEach(s => {
+        const classObj = classrooms.find(c => c.id === s.classId);
+        const classNameStr = classObj?.name || 'Chưa xếp lớp';
+        const availableSubjects = classObj?.talentSubjects || [];
+        const registeredIds = s.registeredTalentSubjects || [];
+        const subjectNames = availableSubjects
+          .filter(subj => registeredIds.includes(subj.id))
+          .map(subj => subj.name)
+          .join(', ') || 'Không đăng ký';
+
+        const talentFeeVal = s.talentFee || 0;
+        const otherFeeVal = s.otherFee || 0;
+        const totalVal = talentFeeVal + otherFeeVal;
+        const statusStr = s.talentFeePaid ? 'Đã đóng' : 'Chưa đóng';
+        const paymentMethodStr = s.talentFeePaid ? (s.paymentMethod || 'Chuyển khoản') : 'Chưa đóng';
+
+        dataRows.push([
+          s.studentCode,
+          s.fullName,
+          classNameStr,
+          subjectNames,
+          talentFeeVal,
+          otherFeeVal,
+          s.otherFeeDescription || '',
+          totalVal,
+          statusStr,
+          paymentMethodStr
+        ]);
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(dataRows);
+
+      ws['!cols'] = [
+        { wch: 15 }, // Mã Học Sinh
+        { wch: 25 }, // Họ và Tên
+        { wch: 15 }, // Lớp
+        { wch: 30 }, // Môn Học Đăng Ký
+        { wch: 20 }, // Học Phí Năng Khiếu
+        { wch: 18 }, // Các Phí Khác
+        { wch: 25 }, // Nội Dung Phí Khác
+        { wch: 18 }, // Tổng Tiền
+        { wch: 18 }, // Trạng Thái
+        { wch: 22 }, // Hình Thức Thanh Toán
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "Thanh Toan Hoc Phi");
+      XLSX.writeFile(wb, `bao_cao_dong_phi_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (e) {
+      console.error(e);
+      alert('Xuất file Excel thanh toán thất bại.');
+    }
+  };
+
+  // Print fee payments report (Tuition & Other fees) as PDF
+  const handlePrintFeeReportPDF = () => {
+    try {
+      const selectedClassObj = classrooms.find(c => c.id === classFilter);
+      const classNameText = selectedClassObj ? `Lớp ${selectedClassObj.name}` : 'Tất cả các lớp';
+      
+      const monthText = monthFilter === 'all' 
+        ? 'Tất cả các tháng' 
+        : formatMonthLabel(monthFilter);
+
+      const schoolNameText = settings.schoolName || 'Trường Mầm Non';
+
+      let totalExpected = 0;
+      let totalCollected = 0;
+      let totalRemaining = 0;
+      let paidCount = 0;
+      let unpaidCount = 0;
+
+      const rowsHtml = filteredStudents.map((s, idx) => {
+        const classObj = classrooms.find(c => c.id === s.classId);
+        const classNameStr = classObj?.name || 'Chưa xếp lớp';
+        const availableSubjects = classObj?.talentSubjects || [];
+        const registeredIds = s.registeredTalentSubjects || [];
+        const subjectNames = availableSubjects
+          .filter(subj => registeredIds.includes(subj.id))
+          .map(subj => subj.name)
+          .join(', ') || 'Không đăng ký';
+
+        const talentFeeVal = s.talentFee || 0;
+        const otherFeeVal = s.otherFee || 0;
+        const totalVal = talentFeeVal + otherFeeVal;
+        
+        totalExpected += totalVal;
+        if (s.talentFeePaid) {
+          totalCollected += totalVal;
+          paidCount++;
+        } else {
+          totalRemaining += totalVal;
+          unpaidCount++;
+        }
+
+        const statusStr = s.talentFeePaid ? 'Đã đóng' : 'Chưa đóng';
+        const statusClass = s.talentFeePaid ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold';
+        const paymentMethodStr = s.talentFeePaid ? (s.paymentMethod || 'Chuyển khoản') : '-';
+
+        return `
+          <tr>
+            <td style="text-align: center;">${idx + 1}</td>
+            <td style="font-family: monospace; font-weight: bold;">${s.studentCode}</td>
+            <td style="font-weight: bold;">${s.fullName}</td>
+            <td>${classNameStr}</td>
+            <td>${subjectNames}</td>
+            <td style="text-align: right;">${talentFeeVal.toLocaleString('vi-VN')}</td>
+            <td style="text-align: right;">${otherFeeVal.toLocaleString('vi-VN')}</td>
+            <td>${s.otherFeeDescription || ''}</td>
+            <td style="text-align: right; font-weight: bold;">${totalVal.toLocaleString('vi-VN')}</td>
+            <td class="${statusClass}" style="text-align: center;">${statusStr}</td>
+            <td style="text-align: center;">${paymentMethodStr}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const printWindowContent = `
+        <html>
+          <head>
+            <title>Bảng Kê Đóng Phí</title>
+            <style>
+              body {
+                font-family: "Segoe UI", "Arial", sans-serif;
+                color: #334155;
+                margin: 0;
+                padding: 20px;
+                line-height: 1.5;
+              }
+              .header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 25px;
+                border-bottom: 2px solid #e2e8f0;
+                padding-bottom: 15px;
+              }
+              .school-info {
+                font-size: 14px;
+                font-weight: bold;
+                color: #1e293b;
+                text-transform: uppercase;
+              }
+              .title-area {
+                text-align: center;
+                margin-bottom: 25px;
+              }
+              .title-area h1 {
+                margin: 0;
+                font-size: 22px;
+                color: #0f172a;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              .title-area p {
+                margin: 5px 0 0 0;
+                font-size: 13px;
+                color: #64748b;
+                font-weight: 500;
+              }
+              .meta-grid {
+                display: flex;
+                gap: 30px;
+                margin-bottom: 20px;
+                font-size: 12px;
+                color: #475569;
+                background-color: #f8fafc;
+                padding: 10px 15px;
+                border-radius: 8px;
+              }
+              .meta-item strong {
+                color: #0f172a;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 11px;
+                margin-bottom: 25px;
+              }
+              th, td {
+                border: 1px solid #cbd5e1;
+                padding: 8px 6px;
+                text-align: left;
+              }
+              th {
+                background-color: #f1f5f9;
+                color: #1e293b;
+                font-weight: bold;
+                text-transform: uppercase;
+                font-size: 10px;
+              }
+              tr:nth-child(even) {
+                background-color: #f8fafc;
+              }
+              .text-emerald-600 {
+                color: #059669 !important;
+              }
+              .text-rose-600 {
+                color: #dc2626 !important;
+              }
+              .summary-cards {
+                display: flex;
+                gap: 15px;
+                margin-bottom: 30px;
+              }
+              .card {
+                flex: 1;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 10px 15px;
+                background-color: #f8fafc;
+              }
+              .card-title {
+                font-size: 9px;
+                text-transform: uppercase;
+                color: #64748b;
+                font-weight: bold;
+                margin-bottom: 4px;
+                letter-spacing: 0.5px;
+              }
+              .card-value {
+                font-size: 16px;
+                font-weight: 800;
+                color: #0f172a;
+              }
+              .footer-signatures {
+                margin-top: 40px;
+                display: flex;
+                justify-content: space-between;
+                page-break-inside: avoid;
+              }
+              .signature-box {
+                text-align: center;
+                width: 200px;
+              }
+              .signature-title {
+                font-size: 12px;
+                font-weight: bold;
+                color: #1e293b;
+                margin-bottom: 60px;
+              }
+              .signature-name {
+                font-size: 12px;
+                font-weight: bold;
+                color: #334155;
+              }
+              @media print {
+                body {
+                  padding: 0;
+                  color: #000;
+                }
+                .card {
+                  background-color: #fff !important;
+                  border: 1px solid #cbd5e1 !important;
+                }
+                .meta-grid {
+                  background-color: #fff !important;
+                  border: 1px solid #cbd5e1 !important;
+                }
+                th {
+                  background-color: #e2e8f0 !important;
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
+                tr:nth-child(even) {
+                  background-color: #f8fafc !important;
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div class="school-info">
+                ${schoolNameText}<br/>
+                <span style="font-size: 10px; font-weight: normal; text-transform: none; color: #64748b;">Hệ thống Quản lý Mầm Non</span>
+              </div>
+              <div style="font-size: 11px; text-align: right; color: #64748b;">
+                Mẫu số: B01-HP<br/>
+                Ngày lập: ${new Date().toLocaleDateString('vi-VN')}
+              </div>
+            </div>
+
+            <div class="title-area">
+              <h1>BẢNG KÊ THU HỌC PHÍ & PHÍ KHÁC</h1>
+              <p>Môn Năng Khiếu & Các Khoản Phí Khác Phát Sinh</p>
+            </div>
+
+            <div class="meta-grid">
+              <div class="meta-item">Lớp học: <strong>${classNameText}</strong></div>
+              <div class="meta-item">Chu kỳ thu: <strong>${monthText}</strong></div>
+              <div class="meta-item">Tổng số học sinh: <strong>${filteredStudents.length} bé</strong></div>
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 4%; text-align: center;">STT</th>
+                  <th style="width: 10%;">Mã HS</th>
+                  <th style="width: 16%;">Họ và Tên</th>
+                  <th style="width: 8%;">Lớp</th>
+                  <th style="width: 18%;">Môn Năng Khiếu</th>
+                  <th style="width: 11%; text-align: right;">Học Phí NK (đ)</th>
+                  <th style="width: 10%; text-align: right;">Phí Khác (đ)</th>
+                  <th style="width: 13%;">Mô Tả Phí Khác</th>
+                  <th style="width: 11%; text-align: right;">Tổng Tiền (đ)</th>
+                  <th style="width: 9%; text-align: center;">Trạng Thái</th>
+                  <th style="width: 10%; text-align: center;">Hình Thức</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml || '<tr><td colspan="11" style="text-align: center; padding: 20px; color: #64748b;">Không có dữ liệu đóng phí phù hợp với bộ lọc hiện tại.</td></tr>'}
+              </tbody>
+            </table>
+
+            <div class="summary-cards">
+              <div class="card">
+                <div class="card-title">Tổng Dự Thu</div>
+                <div class="card-value">${totalExpected.toLocaleString('vi-VN')} đ</div>
+                <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Của ${filteredStudents.length} học sinh</div>
+              </div>
+              <div class="card" style="border-left: 3px solid #10b981;">
+                <div class="card-title" style="color: #059669;">Đã Thu</div>
+                <div class="card-value" style="color: #059669;">${totalCollected.toLocaleString('vi-VN')} đ</div>
+                <div style="font-size: 10px; color: #059669; margin-top: 2px;">Đã đóng: ${paidCount} bé</div>
+              </div>
+              <div class="card" style="border-left: 3px solid #f43f5e;">
+                <div class="card-title" style="color: #dc2626;">Chưa Thu</div>
+                <div class="card-value" style="color: #dc2626;">${totalRemaining.toLocaleString('vi-VN')} đ</div>
+                <div style="font-size: 10px; color: #dc2626; margin-top: 2px;">Chưa đóng: ${unpaidCount} bé</div>
+              </div>
+            </div>
+
+            <div class="footer-signatures">
+              <div class="signature-box">
+                <div class="signature-title">Người Lập Bảng kê</div>
+                <div style="font-style: italic; font-size: 11px; color: #64748b; margin-bottom: 45px;">(Ký, ghi rõ họ tên)</div>
+                <div class="signature-name">Giáo viên lập bảng</div>
+              </div>
+              <div class="signature-box">
+                <div class="signature-title">Ban Giám Hiệu</div>
+                <div style="font-style: italic; font-size: 11px; color: #64748b; margin-bottom: 45px;">(Ký tên, đóng dấu)</div>
+                <div class="signature-name">Hiệu Trưởng</div>
+              </div>
+            </div>
+
+            <script>
+              window.onload = function() {
+                window.print();
+              }
+            </script>
+          </body>
+        </html>
+      `;
+
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow?.document || iframe.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(printWindowContent);
+        doc.close();
+
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 3000);
+      } else {
+        alert('Không khởi tạo được bộ in. Vui lòng kiểm tra lại trình duyệt.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Thực hiện in báo cáo thất bại.');
+    }
+  };
 
   // Export to CSV
   const handleExportCSV = () => {
@@ -601,6 +1091,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
           talentFee: calculatedTalentFee,
           registeredTalentSubjects: registeredTalentIds,
           talentFeePaid: false,
+          talentFeeDueDate: getDefaultDueDate(),
         });
       }
 
@@ -808,6 +1299,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
             talentFee: calculatedTalentFee,
             registeredTalentSubjects: registeredTalentIds,
             talentFeePaid: false,
+            talentFeeDueDate: getDefaultDueDate(),
           });
         }
         
@@ -856,6 +1348,71 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
     setImportText(templateHeader + sampleRows);
   };
 
+  const handleNextBulkFeeStep = () => {
+    setBulkError('');
+    const parsedAmount = parseMoneyInput(bulkOtherFee);
+    if (parsedAmount < 0) {
+      setBulkError('Số tiền nhập vào không hợp lệ! Vui lòng nhập số lớn hơn hoặc bằng 0.');
+      return;
+    }
+    
+    // Find target students
+    const targetStudents = students.filter(s => bulkClassFilter === 'all' || s.classId === bulkClassFilter);
+    if (targetStudents.length === 0) {
+      setBulkError('Không tìm thấy học sinh nào thuộc đối tượng đã chọn.');
+      return;
+    }
+
+    setBulkConfirmStep(true);
+  };
+
+  const handleSaveBulkFee = () => {
+    setBulkError('');
+    const parsedAmount = parseMoneyInput(bulkOtherFee);
+    if (parsedAmount < 0) {
+      setBulkError('Số tiền nhập vào không hợp lệ!');
+      return;
+    }
+    
+    // Find target students
+    const targetStudents = students.filter(s => bulkClassFilter === 'all' || s.classId === bulkClassFilter);
+    if (targetStudents.length === 0) {
+      setBulkError('Không tìm thấy học sinh nào thuộc đối tượng đã chọn.');
+      return;
+    }
+
+    const updatedStudents = students.map(s => {
+      const matchesTarget = bulkClassFilter === 'all' || s.classId === bulkClassFilter;
+      if (!matchesTarget) return s;
+
+      let newOtherFee = s.otherFee || 0;
+      let newDescription = s.otherFeeDescription || '';
+
+      if (bulkActionType === 'overwrite') {
+        newOtherFee = parsedAmount;
+        newDescription = bulkOtherFeeDescription.trim();
+      } else {
+        newOtherFee += parsedAmount;
+        if (bulkOtherFeeDescription.trim()) {
+          newDescription = newDescription 
+            ? `${newDescription} + ${bulkOtherFeeDescription.trim()}`
+            : bulkOtherFeeDescription.trim();
+        }
+      }
+
+      return {
+        ...s,
+        otherFee: newOtherFee > 0 ? newOtherFee : undefined,
+        otherFeeDescription: newDescription || undefined,
+        talentFeePaid: bulkResetPaidStatus ? false : s.talentFeePaid
+      };
+    });
+
+    saveStudents(updatedStudents);
+    setBulkSuccessMsg(`Đã cập nhật phí thành công cho ${targetStudents.length} học sinh!`);
+    setBulkConfirmStep(false);
+  };
+
   return (
     <div className="space-y-6">
       {/* Title Header */}
@@ -888,6 +1445,40 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
           </button>
           
           <button
+            onClick={handleExportFeePaymentsExcel}
+            className="px-3.5 py-2.5 border border-emerald-200 dark:border-emerald-900 bg-emerald-500/5 hover:bg-emerald-500/10 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-2 transition cursor-pointer"
+          >
+            <Download size={14} />
+            <span>Xuất Excel Đóng Phí</span>
+          </button>
+
+          <button
+            onClick={handlePrintFeeReportPDF}
+            className="px-3.5 py-2.5 border border-rose-200 dark:border-rose-900 bg-rose-500/5 hover:bg-rose-500/10 rounded-xl text-xs font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-2 transition cursor-pointer"
+          >
+            <Printer size={14} />
+            <span>In Báo Cáo</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              setBulkClassFilter('all');
+              setBulkOtherFee('');
+              setBulkOtherFeeDescription('');
+              setBulkActionType('overwrite');
+              setBulkResetPaidStatus(true);
+              setBulkConfirmStep(false);
+              setBulkError('');
+              setBulkSuccessMsg('');
+              setIsBulkFeeOpen(true);
+            }}
+            className="px-3.5 py-2.5 border border-amber-200 dark:border-amber-900 bg-amber-500/5 hover:bg-amber-500/10 rounded-xl text-xs font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-2 transition cursor-pointer"
+          >
+            <Coins size={14} />
+            <span>Nhập phí hàng loạt</span>
+          </button>
+          
+          <button
             onClick={handleOpenAdd}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition transform hover:-translate-y-0.5 cursor-pointer shadow-lg ${getThemeBgClass()}`}
           >
@@ -916,25 +1507,47 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
           />
         </div>
         
-        {/* Class Filter */}
-        <div className="flex items-center gap-2.5 w-full md:w-auto shrink-0">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-            <Filter size={14} /> Lớp:
-          </span>
-          <select
-            id="class-filter"
-            value={classFilter}
-            onChange={(e) => {
-              setClassFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="flex-1 md:flex-initial px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none"
-          >
-            <option value="all">Tất cả lớp học</option>
-            {classrooms.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+        {/* Class & Month Filters */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto shrink-0">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Filter size={14} /> Lớp:
+            </span>
+            <select
+              id="class-filter"
+              value={classFilter}
+              onChange={(e) => {
+                setClassFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="flex-1 sm:flex-initial px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none"
+            >
+              <option value="all">Tất cả lớp học</option>
+              {classrooms.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Calendar size={14} /> Tháng:
+            </span>
+            <select
+              id="month-filter"
+              value={monthFilter}
+              onChange={(e) => {
+                setMonthFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="flex-1 sm:flex-initial px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none"
+            >
+              <option value="all">Tất cả các tháng</option>
+              {uniqueMonths.map(m => (
+                <option key={m} value={m}>{formatMonthLabel(m)}</option>
+              ))}
+            </select>
+          </div>
           
           <div className="text-xs font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800/60 px-2.5 py-2 rounded-xl shrink-0">
             Tổng cộng: <strong className="text-slate-700 dark:text-slate-200">{filteredStudents.length}</strong>
@@ -1003,10 +1616,17 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                   {/* Học phí Năng khiếu & Trạng thái thanh toán */}
                   <div className="border-t border-dashed border-slate-100 dark:border-slate-800/80 pt-2.5 mt-2.5 flex items-center justify-between">
                     <div className="flex flex-col">
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">HP Năng khiếu</span>
-                      <span className="font-mono text-[11px] font-bold text-amber-600 dark:text-amber-400">
-                        {(s.talentFee || 0).toLocaleString('vi-VN')} đ
+                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">
+                        {s.otherFee ? 'Tổng HP (+Phí khác)' : 'HP Năng khiếu'}
                       </span>
+                      <span className="font-mono text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                        {((s.talentFee || 0) + (s.otherFee || 0)).toLocaleString('vi-VN')} đ
+                      </span>
+                      {s.otherFee && (
+                        <span className="text-[8px] text-slate-400 dark:text-slate-500 italic line-clamp-1">
+                          (Năng khiếu: {s.talentFee?.toLocaleString('vi-VN')} đ | Khác: {s.otherFee?.toLocaleString('vi-VN')} đ)
+                        </span>
+                      )}
                     </div>
                     
                     <label 
@@ -1338,22 +1958,37 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                       );
                     } else {
                       return (
-                        <span className="text-[10px] text-slate-400 italic pl-3 border-l-2 border-slate-200 dark:border-slate-800">
+                        <span className="text-[10px] text-slate-400 italic pl-3 border-l-2 border-slate-200 dark:border-slate-800 mt-1">
                           Chưa đăng ký môn năng khiếu nào
                         </span>
                       );
                     }
                   })()}
+
+                  {/* Khoản phí khác nếu có */}
+                  {selectedStudent.otherFee !== undefined && selectedStudent.otherFee > 0 && (
+                    <div className="flex justify-between items-center text-rose-600 dark:text-rose-400 border-t border-slate-200/40 dark:border-slate-700/40 pt-2.5 mt-2">
+                      <div className="flex flex-col">
+                        <span>Phí khác phát sinh:</span>
+                        {selectedStudent.otherFeeDescription && (
+                          <span className="text-[9px] text-slate-400 dark:text-slate-500 italic">({selectedStudent.otherFeeDescription})</span>
+                        )}
+                      </div>
+                      <span className="font-bold font-mono">
+                        {selectedStudent.otherFee.toLocaleString('vi-VN')} đ
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-between items-center border-t border-slate-200/50 dark:border-slate-700/50 pt-2.5 font-bold text-slate-800 dark:text-white">
-                  <span>Tổng tiền học phí:</span>
+                  <span>Tổng tiền học phí phải đóng:</span>
                   <span className="text-indigo-600 dark:text-indigo-400 font-mono text-sm">
-                    {((selectedStudent.talentFee || 0).toLocaleString('vi-VN'))} đ
+                    {(((selectedStudent.talentFee || 0) + (selectedStudent.otherFee || 0)).toLocaleString('vi-VN'))} đ
                   </span>
                 </div>
 
-                {selectedStudent.talentFee !== undefined && selectedStudent.talentFee > 0 && (
+                {((selectedStudent.talentFee || 0) + (selectedStudent.otherFee || 0)) > 0 && (
                   <div className="flex justify-between items-center border-t border-slate-200/50 dark:border-slate-700/50 pt-2.5 text-xs text-slate-500">
                     <span className="font-medium">Hạn đóng học phí:</span>
                     <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
@@ -1379,7 +2014,7 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                   </button>
                 </div>
 
-                {!selectedStudent.talentFeePaid && (selectedStudent.talentFee || 0) > 0 && (
+                {!selectedStudent.talentFeePaid && ((selectedStudent.talentFee || 0) + (selectedStudent.otherFee || 0)) > 0 && (
                   <div className="flex justify-end pt-1">
                     <button
                       onClick={() => {
@@ -1673,7 +2308,20 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                                     className="bg-transparent border-0 border-b border-slate-300 dark:border-slate-700 text-[11px] focus:ring-0 focus:border-indigo-500 font-semibold text-slate-800 dark:text-slate-200 py-0.5 px-1 max-w-[125px]"
                                   />
                                 </div>
-                                <div className="flex justify-end">
+                                <div className="flex justify-end items-center gap-3">
+                                  {formTalentFeePaid && (
+                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg">
+                                      <span className="font-medium">Hình thức:</span>
+                                      <select
+                                        value={formPaymentMethod}
+                                        onChange={(e) => setFormPaymentMethod(e.target.value)}
+                                        className="bg-transparent border-none text-[11px] focus:ring-0 font-semibold text-slate-800 dark:text-slate-200 py-0 px-1 cursor-pointer"
+                                      >
+                                        <option value="Chuyển khoản" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">Chuyển khoản</option>
+                                        <option value="Tiền mặt" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">Tiền mặt</option>
+                                      </select>
+                                    </div>
+                                  )}
                                   <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300 bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1.5 rounded-lg border border-amber-100/50 dark:border-amber-900/40">
                                     <input
                                       type="checkbox"
@@ -1691,6 +2339,60 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                       </div>
                     );
                   })()}
+
+                  {/* Quản lý các khoản phí khác */}
+                  <div className="border-t border-slate-100 dark:border-slate-800/80 pt-3 mt-3 normal-case">
+                    <label className="block mb-2 text-slate-800 dark:text-white font-bold ml-0.5 text-xs">
+                      Các khoản phí khác trong tháng (Dã ngoại, Đồng phục,...)
+                    </label>
+                    <div className="space-y-3 bg-slate-50 dark:bg-slate-800/30 p-3 rounded-xl border border-slate-100 dark:border-slate-800/60">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Số tiền (đ)</label>
+                          <input
+                            type="text"
+                            placeholder="Ví dụ: 150.000"
+                            value={otherFee}
+                            onChange={(e) => setOtherFee(formatMoneyInput(e.target.value))}
+                            className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-white dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Nội dung phí khác</label>
+                          <input
+                            type="text"
+                            placeholder="Ví dụ: Tiền đồng phục, dã ngoại..."
+                            value={otherFeeDescription}
+                            onChange={(e) => setOtherFeeDescription(e.target.value)}
+                            className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-white dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Hiển thị cộng dồn học phí nếu có */}
+                      {(() => {
+                        const selectedClass = classrooms.find(c => c.id === classId);
+                        const availableTalentSubjects = selectedClass?.talentSubjects || [];
+                        const talentTotal = availableTalentSubjects
+                          .filter(ts => registeredSubjects.includes(ts.id))
+                          .reduce((sum, ts) => sum + ts.fee, 0);
+                        const parsedOtherFee = parseMoneyInput(otherFee);
+                        const grandTotal = talentTotal + parsedOtherFee;
+
+                        if (grandTotal > 0) {
+                          return (
+                            <div className="border-t border-slate-200/50 dark:border-slate-800/50 pt-2 flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
+                              <span>Tổng cộng phải đóng:</span>
+                              <span className="font-mono text-indigo-600 dark:text-indigo-400 text-xs">
+                                {grandTotal.toLocaleString('vi-VN')} đ
+                              </span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Right Column: Face biometric scanner */}
@@ -2041,6 +2743,255 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                 Xác nhận Import
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK FEE ENTRY DIALOG */}
+      {isBulkFeeOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/65 backdrop-blur-xs" onClick={() => setIsBulkFeeOpen(false)} />
+          
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 relative z-[120] shadow-2xl animate-scale-in text-slate-800 dark:text-slate-100">
+            <button 
+              onClick={() => setIsBulkFeeOpen(false)} 
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+
+            {bulkSuccessMsg ? (
+              // SUCCESS VIEW
+              <div className="text-center py-6 space-y-4">
+                <div className="w-16 h-16 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-2 animate-bounce">
+                  <Check size={36} />
+                </div>
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">Thành công!</h2>
+                <p className="text-xs text-slate-600 dark:text-slate-300 max-w-sm mx-auto leading-relaxed">
+                  {bulkSuccessMsg}
+                </p>
+                <div className="pt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsBulkFeeOpen(false);
+                      setBulkSuccessMsg('');
+                      setBulkOtherFee('');
+                      setBulkOtherFeeDescription('');
+                    }}
+                    className="w-full sm:w-48 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs uppercase shadow-md transition cursor-pointer"
+                  >
+                    Đóng cửa sổ
+                  </button>
+                </div>
+              </div>
+            ) : bulkConfirmStep ? (
+              // CONFIRMATION VIEW
+              <div className="space-y-5">
+                <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-2">
+                  <div className="p-2.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 animate-pulse">
+                    <AlertTriangle size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900 dark:text-white">Xác nhận cập nhật học phí</h2>
+                    <p className="text-[11px] text-slate-500">Vui lòng kiểm tra kỹ thông tin trước khi thực hiện hành động này</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 p-4 rounded-2xl space-y-3 text-xs leading-relaxed">
+                  <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/40 pb-2">
+                    <span className="text-slate-500 dark:text-slate-400 font-medium">Đối tượng áp dụng:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-100 text-right">
+                      {bulkClassFilter === 'all' 
+                        ? `Toàn bộ trường (${students.length} học sinh)` 
+                        : `Lớp ${classrooms.find(c => c.id === bulkClassFilter)?.name || ''} (${students.filter(s => s.classId === bulkClassFilter).length} học sinh)`
+                      }
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/40 pb-2">
+                    <span className="text-slate-500 dark:text-slate-400 font-medium">Khoản phí khác:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-100 text-right">
+                      {parseMoneyInput(bulkOtherFee).toLocaleString('vi-VN')} đ
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/40 pb-2">
+                    <span className="text-slate-500 dark:text-slate-400 font-medium">Nội dung:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-100 text-right italic">
+                      {bulkOtherFeeDescription.trim() || 'Không có mô tả'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-100 dark:border-slate-800/40 pb-2">
+                    <span className="text-slate-500 dark:text-slate-400 font-medium">Phương thức cập nhật:</span>
+                    <span className="font-extrabold text-amber-600 dark:text-amber-400">
+                      {bulkActionType === 'overwrite' ? 'Ghi đè (Thay thế phí cũ)' : 'Cộng dồn (Cộng thêm vào phí cũ)'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 dark:text-slate-400 font-medium">Trạng thái đóng phí:</span>
+                    <span className="font-bold text-rose-600 dark:text-rose-400">
+                      {bulkResetPaidStatus ? 'Đặt lại thành "Chưa đóng"' : 'Giữ nguyên trạng thái đã đóng'}
+                    </span>
+                  </div>
+                </div>
+
+                {bulkError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-semibold leading-normal">
+                    ⚠️ {bulkError}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setBulkConfirmStep(false)}
+                    className="flex-1 py-2.5 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-xs uppercase hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    Quay lại
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveBulkFee}
+                    className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs uppercase shadow-md transition cursor-pointer"
+                  >
+                    Xác nhận thực hiện
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // INPUT FORM VIEW
+              <>
+                <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-5">
+                  <div className="p-2.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                    <Coins size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900 dark:text-white">Nhập phí tháng hàng loạt</h2>
+                    <p className="text-[11px] text-slate-500">Cập nhật nhanh một khoản phí (dã ngoại, đồng phục, đồ dùng...) cho hàng loạt học sinh</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Target Selection */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Đối tượng áp dụng
+                    </label>
+                    <select
+                      value={bulkClassFilter}
+                      onChange={(e) => setBulkClassFilter(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none"
+                    >
+                      <option value="all">Tất cả học sinh toàn trường ({students.length} bé)</option>
+                      {classrooms.map(c => {
+                        const count = students.filter(s => s.classId === c.id).length;
+                        return (
+                          <option key={c.id} value={c.id}>Lớp {c.name} ({count} bé)</option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Fee Inputs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                        Số tiền (đ)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ví dụ: 150.000"
+                        value={bulkOtherFee}
+                        onChange={(e) => setBulkOtherFee(formatMoneyInput(e.target.value))}
+                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                        Tên khoản phí / Nội dung
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ví dụ: Dã ngoại trang trại học đường"
+                        value={bulkOtherFeeDescription}
+                        onChange={(e) => setBulkOtherFeeDescription(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Update Action Method */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+                      Phương thức cập nhật phí
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setBulkActionType('overwrite')}
+                        className={`p-3 rounded-xl border text-left transition ${
+                          bulkActionType === 'overwrite'
+                            ? 'border-amber-500 bg-amber-500/5 dark:bg-amber-950/10 text-amber-900 dark:text-amber-200'
+                            : 'border-slate-200 dark:border-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400'
+                        }`}
+                      >
+                        <div className="text-xs font-extrabold block">Ghi đè (Thay thế)</div>
+                        <div className="text-[10px] opacity-75 mt-1 font-medium">Thay thế toàn bộ phí phát sinh trước đó bằng khoản mới này.</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBulkActionType('accumulate')}
+                        className={`p-3 rounded-xl border text-left transition ${
+                          bulkActionType === 'accumulate'
+                            ? 'border-amber-500 bg-amber-500/5 dark:bg-amber-950/10 text-amber-900 dark:text-amber-200'
+                            : 'border-slate-200 dark:border-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400'
+                        }`}
+                      >
+                        <div className="text-xs font-extrabold block">Cộng dồn</div>
+                        <div className="text-[10px] opacity-75 mt-1 font-medium">Cộng thêm số tiền này vào phí hiện tại của bé và ghép nối tên nội dung.</div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Paid Status Toggle */}
+                  <div className="flex items-center gap-2.5 bg-amber-500/5 border border-amber-500/10 p-3 rounded-2xl">
+                    <input
+                      type="checkbox"
+                      id="bulk-reset-paid"
+                      checked={bulkResetPaidStatus}
+                      onChange={(e) => setBulkResetPaidStatus(e.target.checked)}
+                      className="w-4 h-4 rounded-sm border-slate-300 text-amber-500 focus:ring-amber-500 accent-amber-500"
+                    />
+                    <label htmlFor="bulk-reset-paid" className="text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                      Đặt trạng thái học phí của các bé này thành "Chưa thanh toán"
+                    </label>
+                  </div>
+                </div>
+
+                {bulkError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-semibold mt-4 leading-normal">
+                    ⚠️ {bulkError}
+                  </div>
+                )}
+
+                <div className="flex gap-3 mt-6 border-t border-slate-100 dark:border-slate-800 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkFeeOpen(false)}
+                    className="flex-1 py-2.5 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-xs uppercase hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextBulkFeeStep}
+                    className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs uppercase shadow-md transition cursor-pointer"
+                  >
+                    Cập nhật hàng loạt
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

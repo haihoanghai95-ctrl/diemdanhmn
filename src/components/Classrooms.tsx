@@ -21,7 +21,7 @@ import {
   ClipboardCheck,
   Printer
 } from 'lucide-react';
-import { Classroom, Student, AttendanceRecord, SchoolSettings, AttendanceStatus } from '../types';
+import { Classroom, Student, AttendanceRecord, SchoolSettings, AttendanceStatus, TeacherAccount } from '../types';
 
 interface ClassroomsProps {
   classrooms: Classroom[];
@@ -30,6 +30,9 @@ interface ClassroomsProps {
   students?: Student[];
   attendance?: AttendanceRecord[];
   saveAttendance?: (attendance: AttendanceRecord[]) => void;
+  teachers?: TeacherAccount[];
+  currentTeacherPhone?: string;
+  allClassrooms?: Classroom[];
 }
 
 export default function Classrooms({ 
@@ -38,7 +41,10 @@ export default function Classrooms({
   settings, 
   students = [], 
   attendance = [], 
-  saveAttendance 
+  saveAttendance,
+  teachers = [],
+  currentTeacherPhone,
+  allClassrooms = []
 }: ClassroomsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -58,7 +64,11 @@ export default function Classrooms({
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
   const [formTalentFee, setFormTalentFee] = useState('');
-  const [formTalentSubjects, setFormTalentSubjects] = useState<{ id: string; name: string; fee: string; schedule?: string; timeSlot?: string }[]>([]);
+  const [formTalentSubjects, setFormTalentSubjects] = useState<{ id: string; name: string; fee: string; schedule?: string; timeSlot?: string; isMandatory?: boolean }[]>([]);
+  const [formCoTeachers, setFormCoTeachers] = useState<string[]>([]);
+  const [formPaymentBank, setFormPaymentBank] = useState('');
+  const [formPaymentAccountNo, setFormPaymentAccountNo] = useState('');
+  const [formPaymentAccountName, setFormPaymentAccountName] = useState('');
   const [formError, setFormError] = useState('');
 
   // Quick Attendance Dialog State
@@ -212,6 +222,10 @@ export default function Classrooms({
     setFormDesc('');
     setFormTalentFee('');
     setFormTalentSubjects([]);
+    setFormCoTeachers([]);
+    setFormPaymentBank('');
+    setFormPaymentAccountNo('');
+    setFormPaymentAccountName('');
     setFormError('');
     setIsDialogOpen(true);
   };
@@ -223,12 +237,23 @@ export default function Classrooms({
     setFormDesc(cls.description);
     setFormTalentFee(cls.talentFee !== undefined ? String(cls.talentFee) : '');
     if (cls.talentSubjects && cls.talentSubjects.length > 0) {
-      setFormTalentSubjects(cls.talentSubjects.map(ts => ({ id: ts.id, name: ts.name, fee: String(ts.fee), schedule: ts.schedule || '', timeSlot: ts.timeSlot || '' })));
+      setFormTalentSubjects(cls.talentSubjects.map(ts => ({ 
+        id: ts.id, 
+        name: ts.name, 
+        fee: String(ts.fee), 
+        schedule: ts.schedule || '', 
+        timeSlot: ts.timeSlot || '',
+        isMandatory: ts.isMandatory || false
+      })));
     } else if (cls.talentFee !== undefined && cls.talentFee > 0) {
-      setFormTalentSubjects([{ id: `ts_${Date.now()}`, name: 'Năng khiếu chung', fee: String(cls.talentFee), schedule: '', timeSlot: '' }]);
+      setFormTalentSubjects([{ id: `ts_${Date.now()}`, name: 'Năng khiếu chung', fee: String(cls.talentFee), schedule: '', timeSlot: '', isMandatory: false }]);
     } else {
       setFormTalentSubjects([]);
     }
+    setFormCoTeachers(cls.coTeachers || []);
+    setFormPaymentBank(cls.paymentBank || '');
+    setFormPaymentAccountNo(cls.paymentAccountNo || '');
+    setFormPaymentAccountName(cls.paymentAccountName || '');
     setFormError('');
     setIsDialogOpen(true);
   };
@@ -251,6 +276,16 @@ export default function Classrooms({
       return;
     }
 
+    // Kiểm tra số lượng giáo viên tối thiểu 3 người (1 GV chủ nhiệm + tối thiểu 2 đồng GV)
+    const creators = allClassrooms.map(c => c.createdBy).filter(Boolean);
+    const otherAvailableTeachersCount = teachers.filter(
+      t => t.phone !== currentTeacherPhone && !creators.includes(t.phone)
+    ).length;
+    if (otherAvailableTeachersCount >= 2 && formCoTeachers.length < 2) {
+      setFormError('Lớp học này cần tối thiểu 3 giáo viên quản lý. Vui lòng phân công ít nhất 2 đồng giáo viên!');
+      return;
+    }
+
     // Parse talent subjects list
     const parsedTalentSubjects = formTalentSubjects
       .filter(ts => ts.name.trim() !== '')
@@ -261,7 +296,8 @@ export default function Classrooms({
         name: ts.name.trim(),
         fee: parseInt(ts.fee.replace(/\D/g, '')) || 0,
         schedule: ts.schedule?.trim() || undefined,
-        timeSlot: ts.timeSlot?.trim() || undefined
+        timeSlot: ts.timeSlot?.trim() || undefined,
+        isMandatory: ts.isMandatory || false
       }));
     
     const parsedTalent = parsedTalentSubjects.length > 0 
@@ -276,6 +312,10 @@ export default function Classrooms({
         studentCount: 0,
         talentFee: parsedTalent,
         talentSubjects: parsedTalentSubjects.length > 0 ? parsedTalentSubjects : undefined,
+        coTeachers: formCoTeachers.length > 0 ? formCoTeachers : undefined,
+        paymentBank: formPaymentBank.trim() || undefined,
+        paymentAccountNo: formPaymentAccountNo.trim() || undefined,
+        paymentAccountName: formPaymentAccountName.trim() || undefined,
       };
       saveClassrooms([...classrooms, newClass]);
     } else {
@@ -287,6 +327,10 @@ export default function Classrooms({
             description: formDesc.trim(),
             talentFee: parsedTalent,
             talentSubjects: parsedTalentSubjects.length > 0 ? parsedTalentSubjects : undefined,
+            coTeachers: formCoTeachers.length > 0 ? formCoTeachers : undefined,
+            paymentBank: formPaymentBank.trim() || undefined,
+            paymentAccountNo: formPaymentAccountNo.trim() || undefined,
+            paymentAccountName: formPaymentAccountName.trim() || undefined,
           };
         }
         return c;
@@ -424,6 +468,31 @@ export default function Classrooms({
                           <div>
                             <div className="text-sm font-bold text-slate-900 dark:text-white">{cls.name}</div>
                             <div className="text-[10px] text-slate-400 line-clamp-1 mt-0.5 font-normal">{cls.description}</div>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              {(() => {
+                                const creator = teachers.find(t => t.phone === cls.createdBy);
+                                const coTeacherNames = (cls.coTeachers || [])
+                                  .map(phone => teachers.find(t => t.phone === phone)?.name)
+                                  .filter(Boolean);
+                                return (
+                                  <>
+                                    <span className="text-[9px] bg-slate-100 dark:bg-slate-850 text-slate-600 dark:text-slate-300 font-bold px-1.5 py-0.5 rounded-md border border-slate-200 dark:border-slate-800">
+                                      GV: {creator?.name || 'Admin'}
+                                    </span>
+                                    {coTeacherNames.map((name, i) => (
+                                      <span key={i} className="text-[9px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-semibold px-1.5 py-0.5 rounded-md border border-indigo-100/50 dark:border-indigo-900/30">
+                                        Đồng GV: {name}
+                                      </span>
+                                    ))}
+                                    {coTeacherNames.length === 0 && (
+                                      <span className="text-[9px] bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 font-semibold px-1.5 py-0.5 rounded-md">
+                                        Cần thêm đồng GV (tối thiểu 3 GV)
+                                      </span>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </td>
                         <td className="py-4 px-4 text-right text-amber-600 dark:text-amber-400">
@@ -496,6 +565,31 @@ export default function Classrooms({
                       <div className="space-y-1 pr-2">
                         <h4 className="text-sm font-bold text-slate-900 dark:text-white">{cls.name}</h4>
                         <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-normal font-normal">{cls.description || 'Không có mô tả chi tiết cho lớp học này.'}</p>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          {(() => {
+                            const creator = teachers.find(t => t.phone === cls.createdBy);
+                            const coTeacherNames = (cls.coTeachers || [])
+                              .map(phone => teachers.find(t => t.phone === phone)?.name)
+                              .filter(Boolean);
+                            return (
+                              <>
+                                <span className="text-[9px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold px-2 py-0.5 rounded-md">
+                                  GV: {creator?.name || 'Admin'}
+                                </span>
+                                {coTeacherNames.map((name, i) => (
+                                  <span key={i} className="text-[9px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-semibold px-2 py-0.5 rounded-md">
+                                    Đồng GV: {name}
+                                  </span>
+                                ))}
+                                {coTeacherNames.length === 0 && (
+                                  <span className="text-[9px] bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 font-semibold px-2 py-0.5 rounded-md">
+                                    Cần thêm đồng GV (tối thiểu 3 GV)
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
                       </div>
                       <span className="inline-flex items-center gap-1 shrink-0 font-mono text-[11px] bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg text-slate-600 dark:text-slate-300 font-bold">
                         Sĩ số: {cls.studentCount || 0}
@@ -608,6 +702,31 @@ export default function Classrooms({
                       <p className="text-xs text-slate-400 dark:text-slate-500 line-clamp-2 leading-relaxed">
                         {cls.description || 'Không có mô tả chi tiết cho lớp học này.'}
                       </p>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        {(() => {
+                          const creator = teachers.find(t => t.phone === cls.createdBy);
+                          const coTeacherNames = (cls.coTeachers || [])
+                            .map(phone => teachers.find(t => t.phone === phone)?.name)
+                            .filter(Boolean);
+                          return (
+                            <>
+                              <span className="text-[9px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold px-2 py-0.5 rounded-md">
+                                GV: {creator?.name || 'Admin'}
+                              </span>
+                              {coTeacherNames.map((name, i) => (
+                                <span key={i} className="text-[9px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-semibold px-2 py-0.5 rounded-md">
+                                  Đồng GV: {name}
+                                </span>
+                              ))}
+                              {coTeacherNames.length === 0 && (
+                                <span className="text-[9px] bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 font-semibold px-2 py-0.5 rounded-md">
+                                  Cần thêm đồng GV (tối thiểu 3 GV)
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     {/* Detailed Info Grid inside card */}
@@ -753,7 +872,7 @@ export default function Classrooms({
           <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" onClick={() => setIsDialogOpen(false)} />
 
           {/* Dialog Card */}
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 relative z-10 shadow-2xl animate-scale-in text-slate-800 dark:text-slate-100">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 relative z-10 shadow-2xl animate-scale-in text-slate-800 dark:text-slate-100 max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setIsDialogOpen(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
@@ -842,7 +961,7 @@ export default function Classrooms({
                             <input
                               type="text"
                               placeholder="Học phí"
-                              value={ts.fee}
+                              value={ts.fee ? Number(ts.fee.replace(/\D/g, '')).toLocaleString('vi-VN') : ''}
                               onChange={(e) => {
                                 const val = e.target.value.replace(/\D/g, '');
                                 const updated = [...formTalentSubjects];
@@ -893,6 +1012,24 @@ export default function Classrooms({
                           </div>
                         </div>
 
+                        {/* Checkbox for mandatory subject */}
+                        <div className="flex items-center gap-2 mt-1 select-none">
+                          <input
+                            type="checkbox"
+                            id={`mandatory-${ts.id}-${idx}`}
+                            checked={ts.isMandatory || false}
+                            onChange={(e) => {
+                              const updated = [...formTalentSubjects];
+                              updated[idx].isMandatory = e.target.checked;
+                              setFormTalentSubjects(updated);
+                            }}
+                            className="rounded border-slate-200 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer"
+                          />
+                          <label htmlFor={`mandatory-${ts.id}-${idx}`} className="text-[10px] text-slate-500 dark:text-slate-400 font-bold select-none cursor-pointer normal-case">
+                            Môn học bắt buộc học (Học sinh trong lớp mặc định học)
+                          </label>
+                        </div>
+
                         {ts.fee && (
                           <div className="text-right text-[9px] text-amber-600 dark:text-amber-400 font-bold block normal-case mt-0.5">
                             Học phí: {Number(ts.fee).toLocaleString('vi-VN')} đ
@@ -917,6 +1054,151 @@ export default function Classrooms({
                     Chưa có môn năng khiếu nào. Click "Thêm môn" để tạo mới.
                   </div>
                 )}
+              </div>
+
+              {/* Co-Teachers (Đồng giáo viên) */}
+              <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 space-y-3">
+                <div>
+                  <label className="block text-slate-800 dark:text-white font-bold ml-0.5 mb-1 flex items-center gap-1.5">
+                    <span>Đồng giáo viên</span>
+                    <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-extrabold px-1.5 py-0.5 rounded-md">
+                      Yêu cầu tối thiểu 3 GV/lớp
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-400 font-normal leading-relaxed mb-3 normal-case">
+                    Để đảm bảo quy chuẩn giảng dạy, mỗi lớp học cần được quản lý bởi ít nhất 3 giáo viên (1 giáo viên chủ nhiệm và tối thiểu 2 đồng giáo viên).
+                  </p>
+                </div>
+
+                {/* List of currently selected co-teachers */}
+                {formCoTeachers.length > 0 ? (
+                  <div className="space-y-2">
+                    {formCoTeachers.map((phone, idx) => {
+                      const tInfo = teachers.find(t => t.phone === phone);
+                      return (
+                        <div key={phone} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/30 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800/60">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs uppercase">
+                              {(tInfo?.name || 'GV').charAt(0)}
+                            </div>
+                            <div className="text-left">
+                              <div className="text-xs font-bold text-slate-800 dark:text-white">
+                                {tInfo?.name || 'Giáo viên ẩn danh'}
+                              </div>
+                              <div className="text-[9px] text-slate-400 font-mono font-normal">
+                                SĐT: {phone}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormCoTeachers(formCoTeachers.filter(p => p !== phone));
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg transition shrink-0 cursor-pointer"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 font-normal normal-case">
+                    Chưa phân công đồng giáo viên nào cho lớp này.
+                  </div>
+                )}
+
+                {/* Add co-teacher dropdown select */}
+                {(() => {
+                  const creators = allClassrooms.map(c => c.createdBy).filter(Boolean);
+                  const availableTeachers = teachers.filter(
+                    t => t.phone !== currentTeacherPhone && 
+                         !formCoTeachers.includes(t.phone) &&
+                         !creators.includes(t.phone)
+                  );
+
+                  if (availableTeachers.length > 0) {
+                    return (
+                      <div className="flex gap-2 items-center">
+                        <select
+                          id="select-co-teacher"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val) {
+                              setFormCoTeachers([...formCoTeachers, val]);
+                              e.target.value = ''; // Reset select
+                            }
+                          }}
+                          className="flex-1 px-3 py-2 border border-slate-200 dark:border-slate-700/60 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none transition"
+                        >
+                          <option value="">-- Chọn giáo viên đồng quản lý --</option>
+                          {availableTeachers.map(t => (
+                            <option key={t.phone} value={t.phone}>
+                              {t.name} ({t.phone} - {t.position || 'Giáo viên'})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <p className="text-[9px] text-amber-500 dark:text-amber-400 font-normal italic leading-relaxed normal-case text-center">
+                        Không còn giáo viên khả dụng khác trong hệ thống để chọn làm đồng giáo viên. Hãy tạo thêm giáo viên tại mục "Giáo Viên".
+                      </p>
+                    );
+                  }
+                })()}
+
+                {/* Warning message if count is less than 2 co-teachers */}
+                {formCoTeachers.length < 2 && (
+                  <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] rounded-lg flex items-center gap-1.5 font-semibold normal-case leading-normal">
+                    <AlertCircle size={13} className="shrink-0" />
+                    <span>
+                      Khuyên dùng: Phân công thêm {2 - formCoTeachers.length} đồng giáo viên nữa để đạt tối thiểu 3 giáo viên/lớp theo yêu cầu của trường.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Payment Bank Account Settings */}
+              <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 space-y-3">
+                <label className="block text-slate-800 dark:text-white font-bold ml-0.5">Thông tin nhận học phí năng khiếu tại lớp</label>
+                <p className="text-[10px] text-slate-400 font-normal leading-relaxed normal-case">
+                  Nhập tài khoản ngân hàng của giáo viên lớp để phụ huynh có thể chuyển khoản trực tiếp học phí năng khiếu.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-bold mb-1 ml-0.5 uppercase">Tên Ngân Hàng</label>
+                    <input
+                      type="text"
+                      placeholder="VD: Vietcombank"
+                      value={formPaymentBank}
+                      onChange={(e) => setFormPaymentBank(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700/60 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-bold mb-1 ml-0.5 uppercase">Số Tài Khoản</label>
+                    <input
+                      type="text"
+                      placeholder="VD: 1023456789"
+                      value={formPaymentAccountNo}
+                      onChange={(e) => setFormPaymentAccountNo(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700/60 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none transition font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-bold mb-1 ml-0.5 uppercase">Tên Chủ Tài Khoản</label>
+                    <input
+                      type="text"
+                      placeholder="VD: NGUYEN VAN A"
+                      value={formPaymentAccountName}
+                      onChange={(e) => setFormPaymentAccountName(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700/60 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none transition uppercase"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="flex gap-3 mt-6">

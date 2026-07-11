@@ -35,7 +35,7 @@ import {
   Smile,
   MessageCircle
 } from 'lucide-react';
-import { AttendanceRecord, Classroom, Student, AttendanceStatus, SchoolSettings, DailyAssessment } from '../types';
+import { AttendanceRecord, Classroom, Student, AttendanceStatus, SchoolSettings, DailyAssessment, ClassActivity, ParentNotification } from '../types';
 import { StorageService } from '../utils/storage';
 
 interface AttendanceHistoryProps {
@@ -106,16 +106,56 @@ export default function AttendanceHistory({
     'std_3': { breakfast: true, lunch: true, snack: true },
   });
 
-  // Daily activity checklist
-  const [activities, setActivities] = useState([
-    { id: '1', time: '07:30 - 08:15', title: 'Đón trẻ & Tập thể dục buổi sáng ☀️', completed: true },
-    { id: '2', time: '08:15 - 09:30', title: 'Hoạt động học tập mầm non (Vẽ tranh đất nặn) 🎨', completed: true },
-    { id: '3', time: '09:30 - 10:30', title: 'Vui chơi ngoài trời, khám phá thiên nhiên 🌿', completed: true },
-    { id: '4', time: '10:30 - 11:30', title: 'Vệ sinh cá nhân & Bữa trưa ngon miệng 🍲', completed: false },
-    { id: '5', time: '11:30 - 14:00', title: 'Giấc ngủ trưa yên lành của bé 💤', completed: false },
-    { id: '6', time: '14:15 - 15:00', title: 'Ăn xế dinh dưỡng (Uống sữa, bánh ngọt) 🥛', completed: false },
-    { id: '7', time: '15:00 - 16:30', title: 'Sinh hoạt tự do, kể chuyện cổ tích & Trả trẻ 🎒', completed: false },
-  ]);
+  // Dynamic class activity list
+  const [allActivities, setAllActivities] = useState<ClassActivity[]>([]);
+  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
+  const [editingActivity, setEditingActivity] = useState<ClassActivity | null>(null);
+  const [activityForm, setActivityForm] = useState({
+    title: '',
+    time: ''
+  });
+
+  useEffect(() => {
+    setAllActivities(StorageService.getClassActivities());
+  }, []);
+
+  const classActivities = useMemo(() => {
+    const currentClassId = classFilter === 'all' ? (classrooms[0]?.id || '') : classFilter;
+    const filtered = allActivities.filter(a => a.classId === currentClassId && a.date === dateFilter);
+    
+    if (filtered.length === 0) {
+      // Create standard initial routines for this class & date dynamically if no record exists
+      const standardRoutine = [
+        { time: '07:30 - 08:15', title: 'Đón trẻ & Tập thể dục buổi sáng ☀️' },
+        { time: '08:15 - 09:30', title: 'Hoạt động học tập mầm non (Vẽ tranh đất nặn) 🎨' },
+        { time: '09:30 - 10:30', title: 'Vui chơi ngoài trời, khám phá thiên nhiên 🌿' },
+        { time: '10:30 - 11:30', title: 'Vệ sinh cá nhân & Bữa trưa ngon miệng 🍲' },
+        { time: '11:30 - 14:00', title: 'Giấc ngủ trưa yên lành của bé 💤' },
+        { time: '14:15 - 15:00', title: 'Ăn xế dinh dưỡng (Uống sữa, bánh ngọt) 🥛' },
+        { time: '15:00 - 16:30', title: 'Sinh hoạt tự do, kể chuyện cổ tích & Trả trẻ 🎒' },
+      ];
+      
+      return standardRoutine.map((item, index) => ({
+        id: `act_gen_${currentClassId}_${dateFilter}_${index}`,
+        classId: currentClassId,
+        date: dateFilter,
+        time: item.time,
+        title: item.title,
+        completed: false
+      }));
+    }
+    
+    // Sort activities by time
+    return [...filtered].sort((a, b) => a.time.localeCompare(b.time));
+  }, [allActivities, classFilter, dateFilter, classrooms]);
+
+  const handleSaveClassActivities = (updatedList: ClassActivity[]) => {
+    const currentClassId = classFilter === 'all' ? (classrooms[0]?.id || '') : classFilter;
+    const remaining = allActivities.filter(a => !(a.classId === currentClassId && a.date === dateFilter));
+    const merged = [...remaining, ...updatedList];
+    setAllActivities(merged);
+    StorageService.saveClassActivities(merged);
+  };
 
   // Handle previous and next date navigation
   const handlePrevDay = () => {
@@ -1322,48 +1362,207 @@ export default function AttendanceHistory({
             
             <button
               onClick={() => {
-                const title = prompt('Nhập tên hoạt động mới:');
-                const time = prompt('Nhập khung giờ (Ví dụ: 16:30 - 17:00):');
-                if (title && time) {
-                  setActivities(prev => [...prev, { id: `${Date.now()}`, time, title, completed: false }]);
-                }
+                setEditingActivity(null);
+                setActivityForm({ title: '', time: '' });
+                setIsActivityModalOpen(true);
               }}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/10"
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/10 cursor-pointer"
             >
               <Plus size={14} />
               <span>Thêm hoạt động</span>
             </button>
           </div>
 
-          <div className="relative border-l border-slate-150 pl-5 ml-4 space-y-6 text-xs">
-            {activities.map((act) => (
-              <div key={act.id} className="relative">
-                {/* Timeline node */}
-                <div className={`absolute -left-[27.5px] top-0 w-3.5 h-3.5 rounded-full border-2 ${
-                  act.completed ? 'bg-emerald-500 border-emerald-100' : 'bg-slate-200 border-white dark:border-slate-800'
-                }`} />
+          {classActivities.length === 0 ? (
+            <div className="text-center py-10 text-slate-400 text-xs flex flex-col items-center justify-center gap-2 border border-dashed border-slate-200 dark:border-slate-850 rounded-xl">
+              <span className="text-2xl">⏰</span>
+              <p>Chưa có hoạt động nào được thiết lập cho ngày này.</p>
+            </div>
+          ) : (
+            <div className="relative border-l border-slate-150 pl-5 ml-4 space-y-6 text-xs">
+              {classActivities.map((act) => (
+                <div key={act.id} className="relative">
+                  {/* Timeline node */}
+                  <div className={`absolute -left-[27.5px] top-0 w-3.5 h-3.5 rounded-full border-2 ${
+                    act.completed ? 'bg-emerald-500 border-emerald-100' : 'bg-slate-200 border-white dark:border-slate-800'
+                  }`} />
 
-                <div className="bg-slate-50/50 dark:bg-slate-900/60 p-4 border border-slate-100 dark:border-slate-800 rounded-2xl flex items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase text-rose-500 tracking-wider font-mono">
-                      ⏱️ {act.time}
-                    </span>
-                    <h4 className="font-bold text-slate-800 dark:text-white">{act.title}</h4>
+                  <div className="bg-slate-50/50 dark:bg-slate-900/60 p-4 border border-slate-100 dark:border-slate-800 rounded-2xl flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-rose-500 tracking-wider font-mono">
+                        ⏱️ {act.time}
+                      </span>
+                      <h4 className="font-bold text-slate-800 dark:text-white">{act.title}</h4>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const updated = classActivities.map(a => a.id === act.id ? { ...a, completed: !a.completed } : a);
+                          handleSaveClassActivities(updated);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition text-[10px] cursor-pointer ${
+                          act.completed
+                            ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400'
+                            : 'bg-slate-100 text-slate-500 dark:bg-slate-800 hover:bg-slate-200'
+                        }`}
+                      >
+                        {act.completed ? '✔ Đã hoàn thành' : 'Đang chờ hoạt động'}
+                      </button>
+
+                      {/* Edit button */}
+                      <button
+                        onClick={() => {
+                          setEditingActivity(act);
+                          setActivityForm({ title: act.title, time: act.time });
+                          setIsActivityModalOpen(true);
+                        }}
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 rounded-lg transition cursor-pointer"
+                        title="Sửa hoạt động"
+                      >
+                        <Edit size={14} />
+                      </button>
+
+                      {/* Delete button */}
+                      <button
+                        onClick={() => {
+                          if (confirm('Bạn có chắc chắn muốn xóa hoạt động này?')) {
+                            const updated = classActivities.filter(a => a.id !== act.id);
+                            handleSaveClassActivities(updated);
+                          }
+                        }}
+                        className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-slate-400 hover:text-rose-600 rounded-lg transition cursor-pointer"
+                        title="Xóa hoạt động"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
-
-                  <button
-                    onClick={() => setActivities(prev => prev.map(a => a.id === act.id ? { ...a, completed: !a.completed } : a))}
-                    className={`px-3 py-1.5 rounded-xl font-bold transition text-[10px] ${
-                      act.completed
-                        ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400'
-                        : 'bg-slate-100 text-slate-500 dark:bg-slate-800 hover:bg-slate-200'
-                    }`}
-                  >
-                    {act.completed ? '✔ Đã hoàn thành' : 'Đang chờ hoạt động'}
-                  </button>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ACTIVITY ADD/EDIT MODAL */}
+      {isActivityModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-md w-full overflow-hidden">
+            <div className="p-4 bg-emerald-600 text-white flex items-center justify-between">
+              <h3 className="font-extrabold text-sm uppercase tracking-wider">
+                {editingActivity ? 'Cập Nhật Hoạt Động' : 'Thêm Hoạt Động Mới'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsActivityModalOpen(false);
+                  setEditingActivity(null);
+                }}
+                className="text-white hover:text-slate-200 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!activityForm.title || !activityForm.time) {
+                  alert('Vui lòng điền đầy đủ Tên hoạt động và Khung giờ.');
+                  return;
+                }
+                const currentClassId = classFilter === 'all' ? (classrooms[0]?.id || '') : classFilter;
+                const className = classrooms.find(c => c.id === currentClassId)?.name || 'Lớp học';
+                
+                if (editingActivity) {
+                  const updated = classActivities.map(a => a.id === editingActivity.id ? { ...a, ...activityForm } : a);
+                  handleSaveClassActivities(updated);
+
+                  // Create parent notification for activity update
+                  const parentNotifs = StorageService.getParentNotifications();
+                  const newParentNotif: ParentNotification = {
+                    id: `pnotif_${Date.now()}`,
+                    classId: currentClassId,
+                    className: className,
+                    type: 'activity_update',
+                    title: 'Cập nhật hoạt động lớp con',
+                    content: `Giáo viên vừa cập nhật hoạt động: "${activityForm.title}" (${activityForm.time}) vào ngày ${dateFilter}.`,
+                    createdAt: new Date().toISOString(),
+                    isRead: false
+                  };
+                  StorageService.saveParentNotifications([newParentNotif, ...parentNotifs]);
+                } else {
+                  const newAct: ClassActivity = {
+                    id: `act_${Date.now()}`,
+                    classId: currentClassId,
+                    date: dateFilter,
+                    title: activityForm.title,
+                    time: activityForm.time,
+                    completed: false
+                  };
+                  handleSaveClassActivities([...classActivities, newAct]);
+
+                  // Create parent notification for activity creation
+                  const parentNotifs = StorageService.getParentNotifications();
+                  const newParentNotif: ParentNotification = {
+                    id: `pnotif_${Date.now()}`,
+                    classId: currentClassId,
+                    className: className,
+                    type: 'activity_create',
+                    title: 'Hoạt động mới của lớp con',
+                    content: `Giáo viên vừa thêm hoạt động mới: "${activityForm.title}" vào khung giờ ${activityForm.time} ngày ${dateFilter}.`,
+                    createdAt: new Date().toISOString(),
+                    isRead: false
+                  };
+                  StorageService.saveParentNotifications([newParentNotif, ...parentNotifs]);
+                }
+                setIsActivityModalOpen(false);
+                setEditingActivity(null);
+                setActivityForm({ title: '', time: '' });
+              }}
+              className="p-5 space-y-4"
+            >
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase block">Khung giờ <span className="text-rose-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: 08:15 - 09:30"
+                  value={activityForm.time}
+                  onChange={(e) => setActivityForm(prev => ({ ...prev, time: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:ring-1 focus:ring-emerald-500"
+                />
               </div>
-            ))}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase block">Tên hoạt động <span className="text-rose-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: Hoạt động múa hát tự do 🎵"
+                  value={activityForm.title}
+                  onChange={(e) => setActivityForm(prev => ({ ...prev, title: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsActivityModalOpen(false);
+                    setEditingActivity(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs font-bold rounded-xl transition"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Lưu lại
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
