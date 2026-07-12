@@ -39,7 +39,129 @@
   }
   body {
     background: white !important;
-    color: black !important;
   }
 }
+
+/* Chibi Cute Vector Animations */
+@keyframes chibi-bob {
+  0%, 100% {
+    transform: translateY(0px) scaleY(1);
+  }
+  50% {
+    transform: translateY(-2px) scaleY(1.02);
+  }
+}
+
+@keyframes chibi-jump {
+  0%, 100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  30% {
+    transform: translateY(0) scale(1.06, 0.92); /* Squish down before jumping */
+  }
+  45% {
+    transform: translateY(-7px) scale(0.94, 1.08); /* Lift off and stretch */
+  }
+  60% {
+    transform: translateY(1px) scale(1.04, 0.96); /* Landing compression */
+  }
+  75% {
+    transform: translateY(0) scale(1, 1); /* Settle back */
+  }
+}
+
+@keyframes shadow-scale {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.25;
+  }
+  30% {
+    transform: scale(1.15, 0.9);
+    opacity: 0.35;
+  }
+  45% {
+    transform: scale(0.65);
+    opacity: 0.08;
+  }
+  60% {
+    transform: scale(1.2, 1);
+    opacity: 0.4;
+  }
+  75% {
+    transform: scale(1);
+    opacity: 0.25;
+  }
+}
+
+@keyframes chibi-head {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-1px) rotate(1.5deg);
+  }
+}
+
+@keyframes balloon-bob {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(3deg);
+  }
+}
+
+@keyframes eye-blink {
+  0%, 90%, 100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes arm-wave {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-3deg);
+  }
+}
+
+.animate-chibi-body {
+  animation: chibi-bob 4s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.animate-chibi-jump {
+  animation: chibi-jump 3.2s cubic-bezier(0.28, 0.84, 0.42, 1) infinite;
+  transform-origin: bottom center;
+}
+
+.animate-shadow-scale {
+  animation: shadow-scale 3.2s cubic-bezier(0.28, 0.84, 0.42, 1) infinite;
+  transform-origin: 76px 112px; /* Center of the boy's shadow */
+}
+
+.animate-chibi-head {
+  animation: chibi-head 5s ease-in-out infinite;
+  transform-origin: center 60px;
+}
+
+.animate-balloon {
+  animation: balloon-bob 6s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.animate-eye {
+  animation: eye-blink 4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.animate-arm {
+  animation: arm-wave 4s ease-in-out infinite;
+  transform-origin: left top;
+}
+
 

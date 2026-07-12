@@ -5,6 +5,7 @@
 
 import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
+import { PieChart, Pie, Cell, Tooltip as RechartsTooltip } from 'recharts';
 import {
   Users,
   CheckCircle,
@@ -21,10 +22,62 @@ import {
   BookOpen,
   Check,
   Plus,
-  X
+  X,
+  Edit,
+  MapPin,
+  Calendar,
+  Info,
+  Activity
 } from 'lucide-react';
-import { Classroom, Student, AttendanceRecord, SchoolSettings, AbsenceReport, TeacherNotification, SchoolEvent } from '../types';
+import { Classroom, Student, AttendanceRecord, SchoolSettings, AbsenceReport, TeacherNotification, SchoolEvent, ClassActivity } from '../types';
 import { StorageService } from '../utils/storage';
+
+const isPastEvent = (dateStr: string) => {
+  if (!dateStr) return false;
+  try {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        const eDate = new Date(y, m - 1, d);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return eDate.getTime() < today.getTime();
+      }
+    }
+  } catch {}
+  return false;
+};
+
+const isPastActivity = (dateStr: string, timeStr?: string) => {
+  if (!dateStr) return false;
+  const todayStr = new Date().toISOString().split('T')[0];
+  if (dateStr < todayStr) return true;
+  if (dateStr === todayStr && timeStr) {
+    try {
+      const parts = timeStr.split('-');
+      if (parts.length === 2) {
+        const endTimeStr = parts[1].trim();
+        const endParts = endTimeStr.split(':');
+        if (endParts.length === 2) {
+          const endHour = parseInt(endParts[0], 10);
+          const endMin = parseInt(endParts[1], 10);
+          if (!isNaN(endHour) && !isNaN(endMin)) {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMin = now.getMinutes();
+            if (currentHour > endHour || (currentHour === endHour && currentMin > endMin)) {
+              return true;
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+  return false;
+};
 
 interface DashboardProps {
   students: Student[];
@@ -62,6 +115,7 @@ export default function Dashboard({
   const [events, setEvents] = React.useState<SchoolEvent[]>([]);
   const [isEventModalOpen, setIsEventModalOpen] = React.useState(false);
   const [editingEvent, setEditingEvent] = React.useState<SchoolEvent | null>(null);
+  const [hidePastEvents, setHidePastEvents] = React.useState(false);
   
   const [eventForm, setEventForm] = React.useState<Partial<SchoolEvent>>({
     title: '',
@@ -76,6 +130,112 @@ export default function Dashboard({
   React.useEffect(() => {
     setEvents(StorageService.getSchoolEvents());
   }, []);
+
+  const filteredEvents = React.useMemo(() => {
+    const result = events.filter(evt => !hidePastEvents || !isPastEvent(evt.date));
+    return [...result].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  }, [events, hidePastEvents]);
+
+  // --- INTEGRATED DAILY CLASS ACTIVITIES TIMELINE STATE ---
+  const [activeDashboardScheduleTab, setActiveDashboardScheduleTab] = React.useState<'events' | 'activities'>('events');
+  const [allClassActivities, setAllClassActivities] = React.useState<ClassActivity[]>([]);
+  const [selectedClassId, setSelectedClassId] = React.useState<string>('');
+  const [selectedActivityDate, setSelectedActivityDate] = React.useState<string>(new Date().toISOString().split('T')[0]);
+  const [isActivityModalOpen, setIsActivityModalOpen] = React.useState(false);
+  const [editingActivity, setEditingActivity] = React.useState<ClassActivity | null>(null);
+  const [activityForm, setActivityForm] = React.useState({ title: '', time: '' });
+
+  React.useEffect(() => {
+    setAllClassActivities(StorageService.getClassActivities());
+  }, []);
+
+  React.useEffect(() => {
+    if (classrooms.length > 0 && !selectedClassId) {
+      setSelectedClassId(classrooms[0].id);
+    }
+  }, [classrooms, selectedClassId]);
+
+  const classActivities = React.useMemo(() => {
+    if (!selectedClassId) return [];
+    const filtered = allClassActivities.filter(a => a.classId === selectedClassId && a.date === selectedActivityDate);
+    
+    if (filtered.length === 0) {
+      const standardRoutine = [
+        { time: '07:30 - 08:15', title: 'Đón trẻ & Tập thể dục buổi sáng ☀️' },
+        { time: '08:15 - 09:30', title: 'Hoạt động học tập mầm non (Vẽ tranh đất nặn) 🎨' },
+        { time: '09:30 - 10:30', title: 'Vui chơi ngoài trời, khám phá thiên nhiên 🌿' },
+        { time: '10:30 - 11:30', title: 'Vệ sinh cá nhân & Bữa trưa ngon miệng 🍲' },
+        { time: '11:30 - 14:00', title: 'Giấc ngủ trưa yên lành của bé 💤' },
+        { time: '14:15 - 15:00', title: 'Ăn xế dinh dưỡng (Uống sữa, bánh ngọt) 🥛' },
+        { time: '15:00 - 16:30', title: 'Sinh hoạt tự do, kể chuyện cổ tích & Trả trẻ 🎒' },
+      ];
+      
+      return standardRoutine.map((item, index) => ({
+        id: `act_gen_dash_${selectedClassId}_${selectedActivityDate}_${index}`,
+        classId: selectedClassId,
+        date: selectedActivityDate,
+        time: item.time,
+        title: item.title,
+        completed: false
+      }));
+    }
+    
+    return [...filtered].sort((a, b) => a.time.localeCompare(b.time));
+  }, [allClassActivities, selectedClassId, selectedActivityDate]);
+
+  const handleSaveClassActivities = (updatedList: ClassActivity[]) => {
+    if (!selectedClassId) return;
+    const remaining = allClassActivities.filter(a => !(a.classId === selectedClassId && a.date === selectedActivityDate));
+    const merged = [...remaining, ...updatedList];
+    setAllClassActivities(merged);
+    StorageService.saveClassActivities(merged);
+  };
+
+  const handleOpenAddActivity = () => {
+    setEditingActivity(null);
+    setActivityForm({ title: '', time: '08:00 - 09:00' });
+    setIsActivityModalOpen(true);
+  };
+
+  const handleOpenEditActivity = (act: ClassActivity) => {
+    setEditingActivity(act);
+    setActivityForm({ title: act.title, time: act.time });
+    setIsActivityModalOpen(true);
+  };
+
+  const handleDeleteActivity = (id: string) => {
+    if (confirm('Bạn có chắc chắn muốn xóa hoạt động này?')) {
+      const updated = classActivities.filter(a => a.id !== id);
+      handleSaveClassActivities(updated);
+    }
+  };
+
+  const handleSaveActivity = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activityForm.title || !activityForm.time) {
+      alert('Vui lòng điền đầy đủ Tên hoạt động và Khung giờ.');
+      return;
+    }
+
+    let updatedList: ClassActivity[] = [];
+    if (editingActivity) {
+      updatedList = classActivities.map(a => a.id === editingActivity.id ? { ...a, title: activityForm.title, time: activityForm.time } : a);
+    } else {
+      const newAct: ClassActivity = {
+        id: `act_${Date.now()}`,
+        classId: selectedClassId,
+        date: selectedActivityDate,
+        time: activityForm.time,
+        title: activityForm.title,
+        completed: false
+      };
+      updatedList = [...classActivities, newAct];
+    }
+
+    handleSaveClassActivities(updatedList);
+    setIsActivityModalOpen(false);
+    setEditingActivity(null);
+  };
 
   const handleOpenAddEvent = () => {
     setEditingEvent(null);
@@ -927,127 +1087,125 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* SECTION: SCHOOL EVENTS & HOLIDAYS MANAGEMENT */}
+      {/* SECTION: CLASS ACTIVITIES SCHEDULE */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-150 dark:border-slate-800 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 gap-4">
+          <div className="space-y-1">
             <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <CalendarDays className={getThemeColorClass('text')} size={20} />
-              Quản Lý Sự Kiện & Ngày Lễ Sắp Tới ({events.length})
+              <Activity className={getThemeColorClass('text')} size={20} />
+              Lịch hoạt động của lớp
             </h2>
             <p className="text-xs text-slate-400 dark:text-slate-500">
-              Giáo viên thêm, sửa, xóa các ngày lễ nghỉ học, họp phụ huynh, ngày hội thiếu nhi hiển thị trực quan lên Dashboard cả hệ thống.
+              Theo dõi và cập nhật lịch trình sinh hoạt, vui chơi, học tập từng khung giờ cho các bé trong lớp.
             </p>
           </div>
-          
-          <button
-            type="button"
-            onClick={handleOpenAddEvent}
-            className={`px-4 py-2.5 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer ${getThemeColorClass('bg')}`}
-          >
-            <Plus size={14} />
-            <span>Thêm sự kiện mới</span>
-          </button>
         </div>
 
-        {events.length === 0 ? (
-          <div className="text-center py-10 text-slate-400 text-xs flex flex-col items-center justify-center gap-2 border border-dashed border-slate-200 dark:border-slate-850 rounded-xl">
-            <span className="text-2xl">📅</span>
-            <p>Chưa có sự kiện nào được tạo. Hãy nhấn "Thêm sự kiện mới".</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {events.map((event) => {
-              let badgeBg = 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300';
-              let badgeText = 'Sự kiện';
-              let headerBg = 'bg-indigo-50 border-indigo-100 dark:bg-indigo-950/20 dark:border-indigo-900/30';
-
-              if (event.type === 'meeting') {
-                badgeBg = 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300';
-                badgeText = 'Họp phụ huynh';
-                headerBg = 'bg-purple-50 border-purple-100 dark:bg-purple-950/20 dark:border-purple-900/30';
-              } else if (event.type === 'festival') {
-                badgeBg = 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
-                badgeText = 'Ngày hội';
-                headerBg = 'bg-amber-50 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/30';
-              } else if (event.type === 'holiday') {
-                badgeBg = 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300';
-                badgeText = 'Nghỉ lễ';
-                headerBg = 'bg-rose-50 border-rose-100 dark:bg-rose-950/20 dark:border-rose-900/30';
-              } else if (event.type === 'health') {
-                badgeBg = 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300';
-                badgeText = 'Sức khỏe';
-                headerBg = 'bg-teal-50 border-teal-100 dark:bg-teal-950/20 dark:border-teal-900/30';
-              } else if (event.type === 'sports') {
-                badgeBg = 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
-                badgeText = 'Thể thao';
-                headerBg = 'bg-emerald-50 border-emerald-100 dark:bg-emerald-950/20 dark:border-emerald-900/30';
-              }
-
-              return (
-                <div 
-                  key={event.id}
-                  className={`p-4 rounded-xl border flex flex-col justify-between gap-3 ${headerBg}`}
+        <div className="space-y-4 pt-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-850/60 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+            <div className="flex flex-wrap items-center gap-4 text-xs font-semibold">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-450 whitespace-nowrap">Chọn lớp:</span>
+                <select
+                  value={selectedClassId}
+                  onChange={(e) => setSelectedClassId(e.target.value)}
+                  className="px-2 py-1.5 bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-slate-700 dark:text-slate-300 outline-none cursor-pointer"
                 >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded ${badgeBg}`}>
-                        {badgeText}
+                  {classrooms.map((cls) => (
+                    <option key={cls.id} value={cls.id}>{cls.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-slate-450 whitespace-nowrap">Ngày:</span>
+                <input
+                  type="date"
+                  value={selectedActivityDate}
+                  onChange={(e) => setSelectedActivityDate(e.target.value)}
+                  className="px-2 py-1 bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-lg font-mono font-bold text-slate-700 dark:text-slate-300 outline-none"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenAddActivity}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-xs self-start sm:self-center cursor-pointer"
+            >
+              <Plus size={14} />
+              <span>Thêm hoạt động</span>
+            </button>
+          </div>
+
+          {classActivities.length === 0 ? (
+            <div className="text-center py-10 text-slate-400 text-xs flex flex-col items-center justify-center gap-2 border border-dashed border-slate-200 dark:border-slate-850 rounded-xl">
+              <span className="text-2xl">⏰</span>
+              <p>Chưa có hoạt động nào được thiết lập cho ngày này.</p>
+            </div>
+          ) : (
+            <div className="relative border-l-2 border-slate-150 dark:border-slate-800 pl-5 ml-4 space-y-4 pt-1">
+              {classActivities.map((act) => (
+                <div key={act.id} className="relative">
+                  {/* Timeline node circle */}
+                  <div className={`absolute -left-[28.5px] top-1.5 w-4 h-4 rounded-full border-2 transition ${
+                    act.completed ? 'bg-emerald-500 border-emerald-100 dark:border-emerald-950' : 'bg-slate-200 border-white dark:bg-slate-800 dark:border-slate-900'
+                  }`} />
+
+                  <div className="bg-slate-50/50 dark:bg-slate-900/40 p-4 border border-slate-150/60 dark:border-slate-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1 text-xs">
+                      <span className="text-[10px] font-black uppercase text-rose-500 tracking-wider font-mono bg-rose-50 dark:bg-rose-950/20 px-2 py-0.5 rounded">
+                        ⏱️ {act.time}
                       </span>
-                      <span className="text-[11px] font-bold text-slate-500 font-mono flex items-center gap-1">
-                        📅 {event.date} {event.time && `• ⏰ ${event.time}`}
-                      </span>
+                      <h4 className="font-extrabold text-slate-800 dark:text-slate-100 pt-0.5">{act.title}</h4>
                     </div>
 
-                    <h3 className="font-extrabold text-xs text-slate-800 dark:text-white uppercase tracking-tight">
-                      {event.title}
-                    </h3>
+                    <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = classActivities.map(a => a.id === act.id ? { ...a, completed: !a.completed } : a);
+                          handleSaveClassActivities(updated);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl font-bold transition text-[10px] cursor-pointer ${
+                          act.completed
+                            ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-900/30'
+                            : isPastActivity(selectedActivityDate, act.time)
+                            ? 'bg-slate-50 text-slate-450 dark:bg-slate-800/40 dark:text-slate-500 border border-slate-200/30 dark:border-slate-800/30'
+                            : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-750 border border-transparent'
+                        }`}
+                      >
+                        {act.completed ? '✔ Đã hoàn thành' : isPastActivity(selectedActivityDate, act.time) ? 'Đã diễn ra' : 'Đang chờ hoạt động'}
+                      </button>
 
-                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
-                      {event.description}
-                    </p>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditActivity(act)}
+                        className="p-1.5 hover:bg-slate-150 dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-600 rounded-lg transition cursor-pointer"
+                        title="Sửa hoạt động"
+                      >
+                        <Edit size={14} />
+                      </button>
 
-                    <div className="space-y-1 pt-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                      <div className="flex items-start gap-1">
-                        <span className="text-slate-400 font-bold">📍 Địa điểm:</span>
-                        <span>{event.location}</span>
-                      </div>
-                      {event.note && (
-                        <div className="flex items-start gap-1">
-                          <span className="text-rose-500 dark:text-rose-400 font-bold">⚠️ Lưu ý:</span>
-                          <span className="text-slate-500 dark:text-slate-400 italic">{event.note}</span>
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteActivity(act.id)}
+                        className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-slate-400 hover:text-rose-600 rounded-lg transition cursor-pointer"
+                        title="Xóa hoạt động"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-200/40 dark:border-slate-700/40">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditEvent(event)}
-                      className="px-2.5 py-1.5 bg-white/80 dark:bg-slate-850 hover:bg-white dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg transition border border-slate-200/40 dark:border-slate-700/65 cursor-pointer text-[11px] flex items-center gap-1 font-bold"
-                    >
-                      <Plus size={11} className="rotate-45" />
-                      <span>Sửa</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteEvent(event.id)}
-                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg transition border border-transparent cursor-pointer text-[11px] flex items-center gap-1 font-bold"
-                    >
-                      <Trash2 size={11} />
-                      <span>Xóa</span>
-                    </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* EVENT EDIT/ADD MODAL DIALOG */}
-      {isEventModalOpen && (
+      {false && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -1196,6 +1354,83 @@ export default function Dashboard({
         </div>
       )}
 
+      {/* ACTIVITY EDIT/ADD MODAL */}
+      {isActivityModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-md w-full overflow-hidden"
+          >
+            <div className="p-4 bg-emerald-600 text-white flex items-center justify-between">
+              <h3 className="font-extrabold text-sm uppercase tracking-wider flex items-center gap-2">
+                <Activity size={18} />
+                <span>{editingActivity ? 'Cập Nhật Hoạt Động' : 'Thêm Hoạt Động Mới'}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsActivityModalOpen(false);
+                  setEditingActivity(null);
+                }}
+                className="text-white hover:text-slate-200 cursor-pointer p-1 rounded-lg hover:bg-white/10"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveActivity} className="p-5 space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider">
+                  Tên hoạt động <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={activityForm.title}
+                  onChange={(e) => setActivityForm({ ...activityForm, title: e.target.value })}
+                  placeholder="Ví dụ: Hoạt động múa hát tự do 🎵"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase block tracking-wider">
+                  Khung giờ hoạt động <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={activityForm.time}
+                  onChange={(e) => setActivityForm({ ...activityForm, time: e.target.value })}
+                  placeholder="Ví dụ: 08:30 - 09:30"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsActivityModalOpen(false);
+                    setEditingActivity(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  {editingActivity ? 'Lưu thay đổi' : 'Tạo hoạt động'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
       {/* SECTION: TEACHER NOTIFICATIONS FOR TALENT REGISTRATION */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-150 dark:border-slate-800 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1233,7 +1468,7 @@ export default function Dashboard({
         {notifications.length === 0 ? (
           <div className="text-center py-8 text-slate-400 text-xs flex flex-col items-center justify-center gap-2">
             <span className="text-2xl">🔔</span>
-            <p>Không có thông báo mới về đăng ký môn năng khiếu.</p>
+            <p>Không có thông báo tương tác mới từ phụ huynh.</p>
           </div>
         ) : (
           <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
@@ -1253,7 +1488,7 @@ export default function Dashboard({
                         ? 'bg-slate-100 dark:bg-slate-800 text-slate-400'
                         : 'bg-emerald-100 dark:bg-emerald-950/45 text-emerald-600 dark:text-emerald-400'
                     }`}>
-                      <BookOpen size={16} />
+                      {notification.type === 'event_rsvp' ? <Calendar size={16} /> : <BookOpen size={16} />}
                     </div>
                     
                     <div className="space-y-1">
@@ -1270,15 +1505,19 @@ export default function Dashboard({
                       </div>
                       
                       <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">
-                        {notification.message}
+                        {notification.message || notification.content}
                       </p>
                       
                       <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                        <span className="font-mono">{notification.timestamp}</span>
-                        <span>•</span>
-                        <span className="font-bold text-amber-600 dark:text-amber-400">
-                          Tháng đăng ký: {notification.month ? `${notification.month.split('-')[1]}/${notification.month.split('-')[0]}` : 'Chưa rõ'}
-                        </span>
+                        <span className="font-mono">{notification.timestamp || (notification.createdAt ? new Date(notification.createdAt).toLocaleString('vi-VN') : '')}</span>
+                        {notification.type !== 'event_rsvp' && (
+                          <>
+                            <span>•</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-400">
+                              Tháng đăng ký: {notification.month ? `${notification.month.split('-')[1]}/${notification.month.split('-')[0]}` : 'Chưa rõ'}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

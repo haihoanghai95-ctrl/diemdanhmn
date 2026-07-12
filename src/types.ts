@@ -48,6 +48,7 @@ export interface Student {
   talentFee?: number; // Học phí năng khiếu riêng biệt (nếu có)
   otherFee?: number; // Phí khác nếu có trong tháng
   otherFeeDescription?: string; // Mô tả các khoản phí khác
+  otherFeesList?: { id: string; name: string; amount: number }[]; // Chi tiết các khoản phí khác
   registeredTalentSubjects?: string[]; // ID các môn học năng khiếu học sinh đăng ký
   talentFeePaid?: boolean; // Trạng thái đóng học phí năng khiếu (true: đã đóng, false/undefined: chưa đóng)
   paymentMethod?: string; // Hình thức thanh toán (Chuyển khoản, Tiền mặt)
@@ -79,6 +80,9 @@ export interface SchoolSettings {
   schoolLogo?: string; // Logo trường (Data URL hoặc URL mặc định)
   themeColor: 'blue' | 'emerald' | 'violet' | 'rose' | 'amber';
   darkMode: boolean;
+  welcomeTitle?: string;
+  welcomeSubtitle?: string;
+  welcomeTag?: string;
 }
 
 export interface DashboardStats {
@@ -190,11 +194,14 @@ export interface TeacherNotification {
   className: string;
   parentPhone: string;
   parentName: string;
-  type: 'talent_register' | 'talent_change' | 'absence_request' | 'fee_payment';
+  type: 'talent_register' | 'talent_change' | 'absence_request' | 'fee_payment' | 'event_rsvp';
   content: string;
   createdAt: string;
   read?: boolean;
   isRead?: boolean;
+  message?: string;
+  timestamp?: string;
+  month?: string;
 }
 
 export interface SchoolEvent {

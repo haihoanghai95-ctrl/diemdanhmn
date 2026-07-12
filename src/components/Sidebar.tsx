@@ -21,7 +21,8 @@ import {
   Utensils,
   Heart,
   ClipboardCheck,
-  KeyRound
+  KeyRound,
+  Calendar
 } from 'lucide-react';
 import { SchoolSettings, UserSession } from '../types';
 import ChangePasswordModal from './ChangePasswordModal';
@@ -64,6 +65,7 @@ export default function Sidebar({
     { id: 'assessments', label: 'Đánh giá trẻ hằng ngày', icon: ClipboardCheck },
     { id: 'reports', label: 'Báo cáo thống kê', icon: BarChart3 },
     { id: 'menu', label: 'Đăng thực đơn', icon: Utensils },
+    { id: 'events', label: 'Sự kiện trường', icon: Calendar },
     { id: 'settings', label: 'Cài đặt hệ thống', icon: Settings },
   ].filter(item => {
     if (session?.isTeacher && (item.id === 'settings' || item.id === 'teachers')) return false;

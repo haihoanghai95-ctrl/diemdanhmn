@@ -30,7 +30,8 @@ import {
   Sparkles,
   DollarSign,
   Calendar,
-  Trash2
+  Trash2,
+  Edit
 } from 'lucide-react';
 
 import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, AbsenceReport, TeacherAccount, WeeklyMenu, TeacherNotification } from './types';
@@ -53,9 +54,10 @@ import Reports from './components/Reports';
 import MenuPosting from './components/MenuPosting';
 import SettingsComponent from './components/Settings';
 import DailyAssessments from './components/DailyAssessments';
+import Events from './components/Events';
 
 export default function App() {
-  const [syncStatus, setSyncStatus] = useState<'syncing' | 'synced' | 'error'>('syncing');
+  const [syncStatus, setSyncStatus] = useState<'syncing' | 'synced' | 'error' | 'offline'>('syncing');
   const [showRulesHelper, setShowRulesHelper] = useState(false);
   const [rulesCopied, setRulesCopied] = useState(false);
 
@@ -74,6 +76,15 @@ export default function App() {
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
   const [notifTab, setNotifTab] = useState<'absence' | 'other'>('absence');
 
+  // State for editing welcome banner
+  const [isEditingBanner, setIsEditingBanner] = useState(false);
+  const [bannerForm, setBannerForm] = useState({
+    welcomeTitle: '',
+    welcomeSubtitle: '',
+    welcomeTag: '',
+    schoolName: ''
+  });
+
   // Reusable Firebase and LocalStorage Sync logic
   const runFirebaseSync = async () => {
     setSyncStatus('syncing');
@@ -87,17 +98,31 @@ export default function App() {
         setAttendance(result.attendance);
         setWeeklyMenu(result.weeklyMenu);
         setAbsenceReports(result.absenceReports);
+        
+        if (result.isOffline) {
+          setSyncStatus('offline');
+          return;
+        }
       }
       setSyncStatus('synced');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const isPermissionError = errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("insufficient");
-      if (isPermissionError) {
+      const isOfflineError = errMsg.toLowerCase().includes("offline") || 
+                             errMsg.toLowerCase().includes("could not reach cloud firestore backend") ||
+                             errMsg.toLowerCase().includes("network") ||
+                             errMsg.toLowerCase().includes("unavailable") ||
+                             errMsg.toLowerCase().includes("failed to get document because the client is offline");
+      if (isOfflineError) {
+        console.warn("Firebase sync operating in offline mode.");
+        setSyncStatus('offline');
+      } else if (isPermissionError) {
         console.warn("Firebase sync warning: Security rules permission blocked. Setup guide is now active.");
+        setSyncStatus('error');
       } else {
         console.error("Firebase sync error:", err);
+        setSyncStatus('error');
       }
-      setSyncStatus('error');
     }
   };
 
@@ -301,6 +326,7 @@ export default function App() {
       case 'history': return 'Nhật ký • Lịch sử quét camera';
       case 'reports': return 'Phân tích • Báo cáo chuyên cần';
       case 'menu': return 'Thực phẩm • Đăng thực đơn tuần';
+      case 'events': return 'Sự kiện • Hoạt động trường học';
       case 'settings': return 'Tùy chỉnh • Cấu hình hệ thống';
       default: return 'Tổng quan • Dashboard';
     }
@@ -415,6 +441,8 @@ export default function App() {
     );
   }
 
+  const canEditBanner = session && (session.isAdmin || session.isTeacher);
+
   return (
     <div className={`min-h-screen flex ${settings.themeColor === 'rose' ? 'bg-pink-50/50 dark:bg-slate-950' : 'bg-slate-50 dark:bg-slate-950'} text-slate-800 dark:text-slate-100 transition-colors duration-300`}>
       
@@ -459,6 +487,7 @@ export default function App() {
                  currentTab === 'history' ? 'Lịch sử điểm danh' :
                  currentTab === 'reports' ? 'Báo cáo thống kê' :
                  currentTab === 'menu' ? 'Đăng thực đơn' :
+                 currentTab === 'events' ? 'Sự kiện trường' :
                  currentTab === 'settings' ? 'Cài đặt hệ thống' : 'Tổng quan'}
               </span>
             </div>
@@ -779,32 +808,235 @@ export default function App() {
         <main className="flex-1 p-6 max-w-7xl w-full mx-auto pb-12">
           
           {/* Preschool Friendly Header Announcement Bar */}
-          <div className={`mb-6 p-4 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xs transition-all duration-300 ${getPreschoolBannerStyles().bg}`}>
-            <div className="flex items-center gap-3.5">
-              <span className="text-3xl animate-bounce">🧸</span>
-              <div>
-                <h2 className="text-sm font-bold tracking-tight">
-                  Chào mừng quý thầy cô đến với cổng quản trị <span className="font-extrabold text-sky-600 dark:text-sky-400">{settings.schoolName || 'TRƯỜNG MẦM NON 3'}</span>!
-                </h2>
-                <p className="text-[11px] opacity-85 mt-0.5 font-medium flex items-center gap-1.5 flex-wrap">
-                  <span>🏫 Chúc cô và các bé mầm non một ngày học tập, vui chơi thật nhiều niềm vui!</span>
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-white/70 dark:bg-slate-800 text-[9px] font-bold text-rose-500">Bé Ngoan Xuất Sắc 🌟</span>
-                </p>
-              </div>
-            </div>
+          <div className={`mb-6 p-4 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xs transition-all duration-300 relative overflow-hidden ${getPreschoolBannerStyles().bg}`}>
             
-            {/* Playful Floating Preschool Badges */}
-            <div className="flex items-center gap-2">
-              <div className="flex -space-x-1">
-                <span className="w-6 h-6 rounded-full bg-pink-100 dark:bg-pink-900/40 flex items-center justify-center text-xs shadow-2xs select-none" title="Hoạt động nghệ thuật">🎨</span>
-                <span className="w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-xs shadow-2xs select-none" title="Giờ ăn bổ dưỡng">🍎</span>
-                <span className="w-6 h-6 rounded-full bg-sky-100 dark:bg-sky-900/40 flex items-center justify-center text-xs shadow-2xs select-none" title="Rèn luyện thể thao">⚽</span>
-                <span className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center text-xs shadow-2xs select-none" title="Nhạc kịch vui tươi">🎵</span>
-              </div>
-              <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white/80 dark:bg-slate-800 border border-current/10 shadow-3xs text-slate-700 dark:text-slate-300">
-                Môi Trường Trẻ Thơ 🎈
-              </span>
+            {/* Cute Animated Chibi Boy SVG on Left */}
+            <div className="shrink-0 hidden lg:block select-none">
+              <svg className="w-28 h-28 filter drop-shadow-sm transition-transform duration-300 hover:scale-105" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                {/* Dynamic Ground Shadow (scales in sync with jump) */}
+                <ellipse cx="76" cy="112" rx="18" ry="3.5" fill="#000000" fillOpacity="0.16" className="animate-shadow-scale" />
+
+                {/* JUMPING GROUP (Moves boy and balloon up and down) */}
+                <g className="animate-chibi-jump">
+                  {/* FLOATING BALLOON */}
+                  <g className="animate-balloon">
+                    {/* Balloon String */}
+                    <path d="M40 38 Q45 52 70 76" stroke="#B0C4DE" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+                    {/* Balloon Body */}
+                    <circle cx="36" cy="24" r="18" fill="#60A5FA" fillOpacity="0.8" />
+                    <path d="M36 6 A18 18 0 0 1 54 24 A18 18 0 0 1 36 42 A18 18 0 0 1 18 24 A18 18 0 0 1 36 6 Z" fill="url(#blueBalloonGrad)" />
+                    {/* Cute Bear Face Printed on Balloon */}
+                    <circle cx="36" cy="25" r="10" fill="#FFFFFF" fillOpacity="0.7" />
+                    {/* Bear Ears */}
+                    <circle cx="28" cy="17" r="3.5" fill="#FFFFFF" fillOpacity="0.7" />
+                    <circle cx="44" cy="17" r="3.5" fill="#FFFFFF" fillOpacity="0.7" />
+                    <circle cx="28" cy="17" r="1.5" fill="#3B82F6" />
+                    <circle cx="44" cy="17" r="1.5" fill="#3B82F6" />
+                    {/* Bear Face details */}
+                    <circle cx="33" cy="24" r="1" fill="#1E3A8A" />
+                    <circle cx="39" cy="24" r="1" fill="#1E3A8A" />
+                    <path d="M35 27 C35 28 37 28 37 27" stroke="#1E3A8A" strokeWidth="0.8" fill="none" />
+                    {/* Balloon Highlight */}
+                    <ellipse cx="29" cy="16" rx="4" ry="2" fill="#FFFFFF" fillOpacity="0.6" transform="rotate(-30 29 16)" />
+                    {/* Balloon Tie */}
+                    <path d="M34 42 L38 42 L36 45 Z" fill="#3B82F6" />
+                  </g>
+
+                  {/* CHIBI BOY BODY & HEAD */}
+                  <g className="animate-chibi-body">
+                    {/* Body / Blue Uniform Shirt */}
+                    <path d="M58 88 C58 88 62 110 76 110 C90 110 94 88 94 88 Z" fill="#1D4ED8" />
+                    <path d="M68 88 L76 96 L84 88" fill="#FFFFFF" />
+                    {/* Cute Red Necktie */}
+                    <path d="M75 96 H77 L78 103 L76 106 L74 103 Z" fill="#EF4444" />
+                    
+                    {/* Animated Arm holding balloon string */}
+                    <g className="animate-arm">
+                      <path d="M60 90 Q65 82 70 76" stroke="#FCE1D4" strokeWidth="7" strokeLinecap="round" fill="none" />
+                    </g>
+
+                    {/* Left Arm resting */}
+                    <path d="M92 90 Q97 98 94 104" stroke="#FCE1D4" strokeWidth="6" strokeLinecap="round" fill="none" />
+
+                    {/* CHIBI HEAD */}
+                    <g className="animate-chibi-head">
+                      {/* Hair back */}
+                      <path d="M54 75 C54 58 64 47 76 47 C88 47 98 58 98 75" stroke="#1E293B" strokeWidth="10" strokeLinecap="round" />
+                      {/* Face */}
+                      <circle cx="76" cy="76" r="21" fill="#FCE1D4" />
+                      {/* Ears */}
+                      <circle cx="53" cy="76" r="4.5" fill="#FCE1D4" />
+                      <circle cx="99" cy="76" r="4.5" fill="#FCE1D4" />
+                      {/* Hair Front */}
+                      <path d="M54 70 C57 58 66 48 76 49 C86 48 95 58 98 70 C93 66 87 66 82 68 C77 70 72 68 67 66 C62 64 58 66 54 70 Z" fill="#1E293B" />
+                      {/* Cute Kindergarten Cap */}
+                      <path d="M60 49 C67 42 85 42 92 49 L94 52 H58 L60 49 Z" fill="#1D4ED8" />
+                      <path d="M76 42 V37" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" />
+                      <circle cx="76" cy="36" r="2.5" fill="#F59E0B" />
+                      {/* Blinking Eyes */}
+                      <g className="animate-eye">
+                        <circle cx="68" cy="75" r="2.5" fill="#1E293B" />
+                        <circle cx="84" cy="75" r="2.5" fill="#1E293B" />
+                      </g>
+                      {/* Blushing Cheeks */}
+                      <ellipse cx="63" cy="80" rx="3.5" ry="1.5" fill="#F87171" fillOpacity="0.5" />
+                      <ellipse cx="89" cy="80" rx="3.5" ry="1.5" fill="#F87171" fillOpacity="0.5" />
+                      {/* Smile */}
+                      <path d="M73 82 Q76 85 79 82" stroke="#E11D48" strokeWidth="2" strokeLinecap="round" fill="none" />
+                    </g>
+                  </g>
+                </g>
+                
+                {/* Gradients */}
+                <defs>
+                  <radialGradient id="blueBalloonGrad" cx="30%" cy="30%" r="70%">
+                    <stop offset="0%" stopColor="#93C5FD" />
+                    <stop offset="70%" stopColor="#3B82F6" />
+                    <stop offset="100%" stopColor="#1D4ED8" />
+                  </radialGradient>
+                </defs>
+              </svg>
             </div>
+
+            {/* Middle Text Area - Unified into a single elegant horizontal row */}
+            <div className="flex-1 min-w-0 py-1">
+              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-x-3 gap-y-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100">
+                <span className="tracking-tight flex items-center gap-1.5 flex-wrap justify-center lg:justify-start">
+                  <span>{settings.welcomeTitle || 'Chào mừng quý thầy cô đến với cổng quản trị'}</span>
+                  <span className="font-extrabold text-sky-600 dark:text-sky-400">
+                    {settings.schoolName || 'TRƯỜNG MẦM NON 3'}
+                  </span>!
+                </span>
+                
+                <span className="hidden lg:inline text-slate-300 dark:text-slate-700 font-normal">|</span>
+                
+                <span className="text-[11px] opacity-90 text-slate-600 dark:text-slate-300 font-medium">
+                  {settings.welcomeSubtitle || 'Chúc cô và các bé một ngày thật nhiều niềm vui!'}
+                </span>
+
+                {settings.welcomeTag && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-white/80 dark:bg-slate-850 text-[9px] font-extrabold text-rose-500 border border-rose-100 dark:border-pink-950">
+                    {settings.welcomeTag}
+                  </span>
+                )}
+
+                {canEditBanner && (
+                  <button
+                    onClick={() => {
+                      setBannerForm({
+                        welcomeTitle: settings.welcomeTitle || 'Chào mừng quý thầy cô đến với cổng quản trị',
+                        welcomeSubtitle: settings.welcomeSubtitle || 'Chúc cô và các bé mầm non một ngày học tập, vui chơi thật nhiều niềm vui!',
+                        welcomeTag: settings.welcomeTag || 'Bé Ngoan Xuất Sắc 🌟',
+                        schoolName: settings.schoolName || 'TRƯỜNG MẦM NON 3 - PHƯỜNG BÀN CỜ TP.HỒ CHÍ MINH'
+                      });
+                      setIsEditingBanner(true);
+                    }}
+                    className="inline-flex items-center gap-1 text-[9px] bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20 px-2 py-0.5 rounded-full transition duration-200 cursor-pointer font-bold shrink-0 ml-1"
+                    title="Chỉnh sửa chữ biểu ngữ"
+                  >
+                    <Edit size={9} /> Chỉnh sửa
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Cute Animated Chibi Girl SVG on Right */}
+            <div className="shrink-0 select-none">
+              <svg className="w-28 h-28 filter drop-shadow-sm transition-transform duration-300 hover:scale-105" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                {/* FLOATING PINK BALLOON WITH RABBIT */}
+                <g className="animate-balloon">
+                  {/* Balloon String */}
+                  <path d="M80 38 Q75 52 50 76" stroke="#FFC0CB" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+                  {/* Balloon Body */}
+                  <circle cx="84" cy="24" r="18" fill="#EC4899" fillOpacity="0.85" />
+                  <path d="M84 6 A18 18 0 0 1 102 24 A18 18 0 0 1 84 42 A18 18 0 0 1 66 24 A18 18 0 0 1 84 6 Z" fill="url(#pinkBalloonGrad)" />
+                  {/* Cute White Bunny Face Printed on Balloon */}
+                  <circle cx="84" cy="25" r="9" fill="#FFFFFF" />
+                  {/* Bunny Ears */}
+                  <ellipse cx="80" cy="14" rx="2.5" ry="5" fill="#FFFFFF" />
+                  <ellipse cx="88" cy="14" rx="2.5" ry="5" fill="#FFFFFF" />
+                  <ellipse cx="80" cy="15" rx="1.2" ry="3" fill="#FCA5A5" />
+                  <ellipse cx="88" cy="15" rx="1.2" ry="3" fill="#FCA5A5" />
+                  {/* Bunny Eyes & Bow */}
+                  <circle cx="81.5" cy="24" r="0.8" fill="#374151" />
+                  <circle cx="86.5" cy="24" r="0.8" fill="#374151" />
+                  {/* Pink Bunny Nose */}
+                  <polygon points="83.5,26.5 84.5,26.5 84,27" fill="#F43F5E" />
+                  {/* Balloon Highlight */}
+                  <ellipse cx="77" cy="16" rx="4" ry="2" fill="#FFFFFF" fillOpacity="0.65" transform="rotate(-30 77 16)" />
+                  {/* Balloon Tie */}
+                  <path d="M82 42 L86 42 L84 45 Z" fill="#F43F5E" />
+                </g>
+
+                {/* CHIBI GIRL BODY & HEAD */}
+                <g className="animate-chibi-body">
+                  {/* Body / Pink Dress over White Shirt */}
+                  <path d="M38 108 L46 88 L62 88 L70 108 Z" fill="#F472B6" stroke="#DB2777" strokeWidth="1" />
+                  {/* White long sleeves */}
+                  <path d="M38 108 C36 102 42 88 46 88" stroke="#FFFFFF" strokeWidth="5" strokeLinecap="round" fill="none" />
+                  <path d="M70 108 C72 102 66 88 62 88" stroke="#FFFFFF" strokeWidth="5" strokeLinecap="round" fill="none" />
+                  {/* White Collar */}
+                  <path d="M48 88 Q54 94 60 88" fill="#FFFFFF" />
+                  
+                  {/* Cute Bunny Pocket Detail on Dress */}
+                  <circle cx="56" cy="98" r="4" fill="#FFFFFF" />
+                  <path d="M54 94 L54 91 L55 92 L54 94 Z" fill="#FFFFFF" />
+                  <path d="M58 94 L58 91 L57 92 L58 94 Z" fill="#FFFFFF" />
+                  
+                  {/* Animated Arm holding balloon string */}
+                  <g className="animate-arm">
+                    <path d="M42 90 Q45 82 50 76" stroke="#FCE1D4" strokeWidth="6.5" strokeLinecap="round" fill="none" />
+                  </g>
+
+                  {/* Left Arm resting */}
+                  <path d="M66 90 Q70 96 68 102" stroke="#FCE1D4" strokeWidth="5.5" strokeLinecap="round" fill="none" />
+
+                  {/* CHIBI HEAD */}
+                  <g className="animate-chibi-head">
+                    {/* Hair back */}
+                    <path d="M32 75 C32 56 42 45 54 45 C66 45 76 56 76 75" stroke="#78350F" strokeWidth="11" strokeLinecap="round" />
+                    
+                    {/* Face */}
+                    <circle cx="54" cy="76" r="21" fill="#FCE1D4" />
+                    
+                    {/* Hair Front with beautiful bangs */}
+                    <path d="M32 68 C35 56 44 46 54 47 C64 46 73 56 76 68 C71 63 64 62 59 64 C54 66 49 64 44 62 C39 60 35 63 32 68 Z" fill="#78350F" />
+                    
+                    {/* Cute Pink Bows on Hair sides */}
+                    <path d="M34 62 L28 58 V66 Z" fill="#EC4899" />
+                    <path d="M74 62 L80 58 V66 Z" fill="#EC4899" />
+                    <circle cx="34" cy="62" r="2" fill="#FFFFFF" />
+                    <circle cx="74" cy="62" r="2" fill="#FFFFFF" />
+
+                    {/* Blinking Big Eyes */}
+                    <g className="animate-eye">
+                      <circle cx="46" cy="75" r="3" fill="#1F2937" />
+                      <circle cx="62" cy="75" r="3" fill="#1F2937" />
+                      {/* Catchlights */}
+                      <circle cx="45" cy="74" r="1" fill="#FFFFFF" />
+                      <circle cx="61" cy="74" r="1" fill="#FFFFFF" />
+                    </g>
+                    
+                    {/* Blushing Cheeks */}
+                    <ellipse cx="41" cy="80" rx="3.5" ry="1.5" fill="#FCA5A5" fillOpacity="0.8" />
+                    <ellipse cx="67" cy="80" rx="3.5" ry="1.5" fill="#FCA5A5" fillOpacity="0.8" />
+                    
+                    {/* Open Happy Smile */}
+                    <path d="M50 82 Q54 86 58 82" stroke="#E11D48" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                  </g>
+                </g>
+                
+                {/* Gradients */}
+                <defs>
+                  <radialGradient id="pinkBalloonGrad" cx="30%" cy="30%" r="70%">
+                    <stop offset="0%" stopColor="#FBCFE8" />
+                    <stop offset="70%" stopColor="#EC4899" />
+                    <stop offset="100%" stopColor="#BE185D" />
+                  </radialGradient>
+                </defs>
+              </svg>
+            </div>
+
           </div>
           
           {/* Tab Routing rendering with smooth fade-in and subtle slide-up transitions */}
@@ -918,6 +1150,13 @@ export default function App() {
                 />
               )}
 
+              {currentTab === 'events' && (
+                <Events
+                  students={displayedStudents}
+                  settings={settings}
+                />
+              )}
+
               {currentTab === 'settings' && (
                 <SettingsComponent
                   settings={settings}
@@ -963,6 +1202,104 @@ export default function App() {
                 className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-medium rounded-xl text-xs uppercase shadow-md transition cursor-pointer"
               >
                 Xác nhận đăng xuất
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BANNER EDITING DIALOG */}
+      {isEditingBanner && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs" onClick={() => setIsEditingBanner(false)} />
+          
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 relative z-[110] shadow-2xl animate-scale-in text-slate-800 dark:text-slate-100">
+            <button onClick={() => setIsEditingBanner(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer">
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 text-sky-600 dark:text-sky-400 mb-4">
+              <Sparkles size={24} />
+              <h2 className="text-lg font-bold">Chỉnh sửa nội dung biểu ngữ</h2>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  Tiêu đề chào mừng
+                </label>
+                <input
+                  type="text"
+                  value={bannerForm.welcomeTitle}
+                  onChange={(e) => setBannerForm({ ...bannerForm, welcomeTitle: e.target.value })}
+                  placeholder="Ví dụ: Chào mừng quý thầy cô đến với cổng quản trị"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 focus:outline-hidden focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  Tên trường học
+                </label>
+                <input
+                  type="text"
+                  value={bannerForm.schoolName}
+                  onChange={(e) => setBannerForm({ ...bannerForm, schoolName: e.target.value })}
+                  placeholder="Ví dụ: TRƯỜNG MẦM NON 3"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 focus:outline-hidden focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 text-sm font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  Lời chúc / Phụ đề
+                </label>
+                <textarea
+                  rows={2}
+                  value={bannerForm.welcomeSubtitle}
+                  onChange={(e) => setBannerForm({ ...bannerForm, welcomeSubtitle: e.target.value })}
+                  placeholder="Ví dụ: Chúc cô và các bé mầm non một ngày học tập, vui chơi thật nhiều niềm vui!"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 focus:outline-hidden focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                  Nhãn nổi bật (Mác bé ngoan)
+                </label>
+                <input
+                  type="text"
+                  value={bannerForm.welcomeTag}
+                  onChange={(e) => setBannerForm({ ...bannerForm, welcomeTag: e.target.value })}
+                  placeholder="Ví dụ: Bé Ngoan Xuất Sắc 🌟"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 focus:outline-hidden focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setIsEditingBanner(false)}
+                className="flex-1 py-2.5 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl font-medium text-xs uppercase hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleSaveSettings({
+                    ...settings,
+                    welcomeTitle: bannerForm.welcomeTitle,
+                    welcomeSubtitle: bannerForm.welcomeSubtitle,
+                    welcomeTag: bannerForm.welcomeTag,
+                    schoolName: bannerForm.schoolName
+                  });
+                  setIsEditingBanner(false);
+                }}
+                className="flex-1 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-medium rounded-xl text-xs uppercase shadow-md transition cursor-pointer"
+              >
+                Lưu thay đổi
               </button>
             </div>
           </div>

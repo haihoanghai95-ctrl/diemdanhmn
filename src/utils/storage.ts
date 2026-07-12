@@ -88,6 +88,9 @@ const DEFAULT_SETTINGS: SchoolSettings = {
   schoolName: 'TRƯỜNG MẦM NON 3 - PHƯỜNG BÀN CỜ TP.HỒ CHÍ MINH',
   themeColor: 'rose',
   darkMode: false,
+  welcomeTitle: 'Chào mừng quý thầy cô đến với cổng quản trị',
+  welcomeSubtitle: 'Chúc cô và các bé mầm non một ngày học tập, vui chơi thật nhiều niềm vui!',
+  welcomeTag: 'Bé Ngoan Xuất Sắc 🌟',
 };
 
 // Dữ liệu lớp học ban đầu (Seed Data)

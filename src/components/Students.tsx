@@ -145,6 +145,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
   const [talentFeeDueDate, setTalentFeeDueDate] = useState(getDefaultDueDate());
   const [otherFee, setOtherFee] = useState<string>('');
   const [otherFeeDescription, setOtherFeeDescription] = useState<string>('');
+  const [individualOtherFees, setIndividualOtherFees] = useState<{ id: string; name: string; amount: number }[]>([]);
   const [formError, setFormError] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
   const [selectedQRStudent, setSelectedQRStudent] = useState<Student | null>(null);
@@ -290,6 +291,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
     setTalentFeeDueDate(getDefaultDueDate());
     setOtherFee('');
     setOtherFeeDescription('');
+    setIndividualOtherFees([]);
     setFormError('');
     setQuickNotes('');
     setCapturedImage(null);
@@ -317,6 +319,17 @@ export default function Students({ students, classrooms, saveStudents, settings 
     setTalentFeeDueDate(student.talentFeeDueDate || '');
     setOtherFee(formatMoneyInput(student.otherFee));
     setOtherFeeDescription(student.otherFeeDescription || '');
+    
+    let feesList = student.otherFeesList || [];
+    if (feesList.length === 0 && student.otherFee && student.otherFee > 0) {
+      feesList = [{
+        id: `f_${Date.now()}`,
+        name: student.otherFeeDescription || 'Phí khác',
+        amount: student.otherFee
+      }];
+    }
+    setIndividualOtherFees(feesList);
+
     setFormError('');
     setQuickNotes(student.quickNotes || '');
     setCapturedImage(student.avatar || null);
@@ -531,6 +544,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
         talentFee: calculatedTalentFee,
         otherFee: parseMoneyInput(otherFee) || undefined,
         otherFeeDescription: otherFeeDescription.trim() || undefined,
+        otherFeesList: individualOtherFees.length > 0 ? individualOtherFees : undefined,
         registeredTalentSubjects: registeredSubjects,
         talentFeePaid: formTalentFeePaid,
         paymentMethod: formPaymentMethod,
@@ -560,6 +574,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
             talentFee: calculatedTalentFee,
             otherFee: parseMoneyInput(otherFee) || undefined,
             otherFeeDescription: otherFeeDescription.trim() || undefined,
+            otherFeesList: individualOtherFees.length > 0 ? individualOtherFees : undefined,
             registeredTalentSubjects: registeredSubjects,
             talentFeePaid: formTalentFeePaid,
             paymentMethod: formPaymentMethod,
@@ -1387,10 +1402,25 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
 
       let newOtherFee = s.otherFee || 0;
       let newDescription = s.otherFeeDescription || '';
+      let newList = s.otherFeesList ? [...s.otherFeesList] : [];
+
+      // If list is empty but otherFee is set, create a default item to represent it
+      if (newList.length === 0 && newOtherFee > 0) {
+        newList = [{
+          id: `f_${Date.now()}_init`,
+          name: newDescription || 'Phí khác',
+          amount: newOtherFee
+        }];
+      }
 
       if (bulkActionType === 'overwrite') {
         newOtherFee = parsedAmount;
         newDescription = bulkOtherFeeDescription.trim();
+        newList = parsedAmount > 0 ? [{
+          id: `f_b_${Date.now()}`,
+          name: bulkOtherFeeDescription.trim() || 'Phí khác',
+          amount: parsedAmount
+        }] : [];
       } else {
         newOtherFee += parsedAmount;
         if (bulkOtherFeeDescription.trim()) {
@@ -1398,12 +1428,20 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
             ? `${newDescription} + ${bulkOtherFeeDescription.trim()}`
             : bulkOtherFeeDescription.trim();
         }
+        if (parsedAmount > 0) {
+          newList.push({
+            id: `f_b_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            name: bulkOtherFeeDescription.trim() || 'Phí khác',
+            amount: parsedAmount
+          });
+        }
       }
 
       return {
         ...s,
         otherFee: newOtherFee > 0 ? newOtherFee : undefined,
         otherFeeDescription: newDescription || undefined,
+        otherFeesList: newList.length > 0 ? newList : undefined,
         talentFeePaid: bulkResetPaidStatus ? false : s.talentFeePaid
       };
     });
@@ -1967,16 +2005,29 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
 
                   {/* Khoản phí khác nếu có */}
                   {selectedStudent.otherFee !== undefined && selectedStudent.otherFee > 0 && (
-                    <div className="flex justify-between items-center text-rose-600 dark:text-rose-400 border-t border-slate-200/40 dark:border-slate-700/40 pt-2.5 mt-2">
-                      <div className="flex flex-col">
+                    <div className="border-t border-slate-200/40 dark:border-slate-700/40 pt-2.5 mt-2 space-y-1.5">
+                      <div className="flex justify-between items-center text-rose-600 dark:text-rose-400 font-bold">
                         <span>Phí khác phát sinh:</span>
-                        {selectedStudent.otherFeeDescription && (
-                          <span className="text-[9px] text-slate-400 dark:text-slate-500 italic">({selectedStudent.otherFeeDescription})</span>
-                        )}
+                        <span className="font-mono">
+                          {selectedStudent.otherFee.toLocaleString('vi-VN')} đ
+                        </span>
                       </div>
-                      <span className="font-bold font-mono">
-                        {selectedStudent.otherFee.toLocaleString('vi-VN')} đ
-                      </span>
+                      {selectedStudent.otherFeesList && selectedStudent.otherFeesList.length > 0 ? (
+                        <div className="bg-slate-50 dark:bg-slate-850 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 space-y-1.5 text-left text-[11px] font-bold text-slate-650 dark:text-slate-300">
+                          {selectedStudent.otherFeesList.map((item, idx) => (
+                            <div key={item.id || idx} className="flex justify-between items-center bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-100 dark:border-slate-700/40">
+                              <span>• {item.name}</span>
+                              <span className="font-mono text-slate-500">{item.amount.toLocaleString('vi-VN')} đ</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        selectedStudent.otherFeeDescription && (
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500 italic pl-2.5 border-l-2 border-slate-200 dark:border-slate-800 leading-normal">
+                            ({selectedStudent.otherFeeDescription})
+                          </div>
+                        )
+                      )}
                     </div>
                   )}
                 </div>
@@ -2340,32 +2391,119 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                     );
                   })()}
 
-                  {/* Quản lý các khoản phí khác */}
-                  <div className="border-t border-slate-100 dark:border-slate-800/80 pt-3 mt-3 normal-case">
-                    <label className="block mb-2 text-slate-800 dark:text-white font-bold ml-0.5 text-xs">
-                      Các khoản phí khác trong tháng (Dã ngoại, Đồng phục,...)
-                    </label>
-                    <div className="space-y-3 bg-slate-50 dark:bg-slate-800/30 p-3 rounded-xl border border-slate-100 dark:border-slate-800/60">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Số tiền (đ)</label>
-                          <input
-                            type="text"
-                            placeholder="Ví dụ: 150.000"
-                            value={otherFee}
-                            onChange={(e) => setOtherFee(formatMoneyInput(e.target.value))}
-                            className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-white dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none"
-                          />
+                  {/* Quản lý các khoản phí khác (Mục Phí Khác mới) */}
+                  <div className="border-t border-slate-100 dark:border-slate-800/80 pt-3.5 mt-3.5 normal-case">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-slate-800 dark:text-white font-bold ml-0.5 text-xs uppercase tracking-wide">
+                        Chi tiết các khoản Phí Khác (ngoài Năng khiếu)
+                      </label>
+                      <span className="text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-extrabold px-2 py-0.5 rounded-full">
+                        Cộng dồn tự động
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 bg-slate-50 dark:bg-slate-800/30 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800/60">
+                      {/* Current list of other fees */}
+                      {individualOtherFees.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500 italic text-center py-2">
+                          Chưa có khoản phí khác nào trong tháng này.
+                        </p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                          {individualOtherFees.map((feeItem) => (
+                            <div 
+                              key={feeItem.id} 
+                              className="flex items-center justify-between bg-white dark:bg-slate-800 px-3 py-2 rounded-xl border border-slate-100 dark:border-slate-700/60 text-xs font-bold"
+                            >
+                              <div className="flex-1 min-w-0 pr-2">
+                                <span className="text-slate-700 dark:text-slate-200 truncate block">
+                                  {feeItem.name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0">
+                                  {feeItem.amount.toLocaleString('vi-VN')} đ
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = individualOtherFees.filter(f => f.id !== feeItem.id);
+                                    setIndividualOtherFees(updated);
+                                    const total = updated.reduce((sum, f) => sum + f.amount, 0);
+                                    const desc = updated.map(f => `${f.name} (${f.amount.toLocaleString('vi-VN')}đ)`).join(' + ');
+                                    setOtherFee(total > 0 ? formatMoneyInput(total.toString()) : '');
+                                    setOtherFeeDescription(desc);
+                                  }}
+                                  className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                                  title="Xóa"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        <div>
-                          <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Nội dung phí khác</label>
-                          <input
-                            type="text"
-                            placeholder="Ví dụ: Tiền đồng phục, dã ngoại..."
-                            value={otherFeeDescription}
-                            onChange={(e) => setOtherFeeDescription(e.target.value)}
-                            className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-white dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none"
-                          />
+                      )}
+
+                      {/* Add fee item inline form */}
+                      <div className="border-t border-dashed border-slate-200 dark:border-slate-700 pt-3 mt-1.5">
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-wider block mb-2">
+                          Thêm khoản phí khác nhanh
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                          <div className="sm:col-span-3">
+                            <input
+                              type="text"
+                              id="quick-fee-name"
+                              placeholder="Tên khoản phí (ví dụ: Dã ngoại, Đồng phục...)"
+                              className="w-full px-3 py-1.5 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-white dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/25"
+                            />
+                          </div>
+                          <div className="sm:col-span-2 flex gap-1.5">
+                            <input
+                              type="text"
+                              id="quick-fee-amount"
+                              placeholder="Số tiền (đ)"
+                              onBlur={(e) => {
+                                e.target.value = formatMoneyInput(e.target.value);
+                              }}
+                              className="w-full min-w-[80px] px-3 py-1.5 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-white dark:bg-slate-800 text-xs font-normal text-slate-800 dark:text-slate-100 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/25"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nameEl = document.getElementById('quick-fee-name') as HTMLInputElement;
+                                const amountEl = document.getElementById('quick-fee-amount') as HTMLInputElement;
+                                const name = nameEl?.value?.trim();
+                                const amountVal = parseMoneyInput(amountEl?.value || '0');
+                                if (!name) {
+                                  alert('Vui lòng nhập tên khoản phí!');
+                                  return;
+                                }
+                                if (amountVal <= 0) {
+                                  alert('Vui lòng nhập số tiền lớn hơn 0!');
+                                  return;
+                                }
+                                const newItem = {
+                                  id: `f_${Date.now()}`,
+                                  name,
+                                  amount: amountVal
+                                };
+                                const updated = [...individualOtherFees, newItem];
+                                setIndividualOtherFees(updated);
+                                const total = updated.reduce((sum, f) => sum + f.amount, 0);
+                                const desc = updated.map(f => `${f.name} (${f.amount.toLocaleString('vi-VN')}đ)`).join(' + ');
+                                setOtherFee(formatMoneyInput(total.toString()));
+                                setOtherFeeDescription(desc);
+                                if (nameEl) nameEl.value = '';
+                                if (amountEl) amountEl.value = '';
+                              }}
+                              className="px-2.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl transition shrink-0 flex items-center justify-center cursor-pointer"
+                              title="Thêm"
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -2376,20 +2514,27 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                         const talentTotal = availableTalentSubjects
                           .filter(ts => registeredSubjects.includes(ts.id))
                           .reduce((sum, ts) => sum + ts.fee, 0);
-                        const parsedOtherFee = parseMoneyInput(otherFee);
-                        const grandTotal = talentTotal + parsedOtherFee;
+                        const otherTotal = individualOtherFees.reduce((sum, f) => sum + f.amount, 0);
+                        const grandTotal = talentTotal + otherTotal;
 
-                        if (grandTotal > 0) {
-                          return (
-                            <div className="border-t border-slate-200/50 dark:border-slate-800/50 pt-2 flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
-                              <span>Tổng cộng phải đóng:</span>
+                        return (
+                          <div className="border-t border-slate-200/50 dark:border-slate-800/50 pt-2.5 mt-1 text-xs space-y-1 font-bold text-slate-500 dark:text-slate-400">
+                            <div className="flex justify-between text-[11px]">
+                              <span>Học phí năng khiếu:</span>
+                              <span className="font-mono text-slate-700 dark:text-slate-350">{talentTotal.toLocaleString('vi-VN')} đ</span>
+                            </div>
+                            <div className="flex justify-between text-[11px]">
+                              <span>Tổng phí khác cộng dồn:</span>
+                              <span className="font-mono text-amber-600 dark:text-amber-400">+{otherTotal.toLocaleString('vi-VN')} đ</span>
+                            </div>
+                            <div className="border-t border-dashed border-slate-200 dark:border-slate-750 pt-2 mt-1 flex justify-between items-center text-slate-800 dark:text-slate-200 font-extrabold">
+                              <span>TỔNG CỘNG PHẢI ĐÓNG:</span>
                               <span className="font-mono text-indigo-600 dark:text-indigo-400 text-xs">
                                 {grandTotal.toLocaleString('vi-VN')} đ
                               </span>
                             </div>
-                          );
-                        }
-                        return null;
+                          </div>
+                        );
                       })()}
                     </div>
                   </div>

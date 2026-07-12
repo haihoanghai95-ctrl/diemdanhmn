@@ -74,8 +74,15 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   const isPermissionError = errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("insufficient");
+  const isOfflineError = errMsg.toLowerCase().includes("offline") || 
+                         errMsg.toLowerCase().includes("could not reach cloud firestore backend") ||
+                         errMsg.toLowerCase().includes("network") ||
+                         errMsg.toLowerCase().includes("unavailable");
+
   if (isPermissionError) {
     console.warn('Firestore Permission Blocked (Please configure your Firebase Security Rules):', JSON.stringify(errInfo));
+  } else if (isOfflineError) {
+    console.warn('Firestore Operating Offline (Local state active):', JSON.stringify(errInfo));
   } else {
     console.error('Firestore Error: ', JSON.stringify(errInfo));
   }
@@ -330,6 +337,7 @@ export async function syncOnMount(): Promise<{
   weeklyMenu: WeeklyMenu;
   absenceReports: AbsenceReport[];
   attendance: AttendanceRecord[];
+  isOffline?: boolean;
 } | null> {
   try {
     let hasError = false;
@@ -462,10 +470,21 @@ export async function syncOnMount(): Promise<{
       await saveAttendanceToFirebase(localAttendance).catch(e => { hasError = true; firstError = firstError || e; });
     }
 
-    // If Firestore permission error or network error happened, we still throw to let App.tsx know,
-    // but we can be happy that we did the best we could without losing local state.
+    // If Firestore permission error or network error happened, we handle it gracefully.
+    let isOffline = false;
     if (hasError && firstError) {
-      throw firstError;
+      const errMsg = firstError instanceof Error ? firstError.message : String(firstError);
+      const isOfflineError = errMsg.toLowerCase().includes("offline") || 
+                             errMsg.toLowerCase().includes("could not reach cloud firestore backend") ||
+                             errMsg.toLowerCase().includes("network") ||
+                             errMsg.toLowerCase().includes("unavailable") ||
+                             errMsg.toLowerCase().includes("failed to get document because the client is offline");
+      if (isOfflineError) {
+        console.warn("Firestore sync operating in offline mode: using local storage cache.");
+        isOffline = true;
+      } else {
+        throw firstError;
+      }
     }
 
     console.log("High-performance parallel sync completed successfully.");
@@ -479,14 +498,48 @@ export async function syncOnMount(): Promise<{
       weeklyMenu: finalWeeklyMenu,
       absenceReports: finalAbsenceReports,
       attendance: finalAttendance,
+      isOffline
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     const isPermissionError = errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("insufficient");
+    const isOfflineError = errMsg.toLowerCase().includes("offline") || 
+                           errMsg.toLowerCase().includes("could not reach cloud firestore backend") ||
+                           errMsg.toLowerCase().includes("network") ||
+                           errMsg.toLowerCase().includes("unavailable") ||
+                           errMsg.toLowerCase().includes("failed to get document because the client is offline");
     if (isPermissionError) {
       console.warn("Firestore permissions block or warning encountered during sync.");
-    } else {
-      console.error("Error during syncOnMount:", error);
+      throw error;
+    } else if (isOfflineError) {
+      console.warn("Firestore offline error handled gracefully during syncOnMount.");
+      // Return local cache as fallback instead of throwing
+      const localSettings = JSON.parse(localStorage.getItem('sma_settings') || '{}');
+      const localClassrooms = JSON.parse(localStorage.getItem('sma_classrooms') || '[]');
+      const localStudents = JSON.parse(localStorage.getItem('sma_students') || '[]');
+      const localTeachers = JSON.parse(localStorage.getItem('sma_teachers') || '[]');
+      const localParents = JSON.parse(localStorage.getItem('sma_parents') || '[]');
+      const localWeeklyMenu = JSON.parse(localStorage.getItem('sma_weekly_menu') || 'null');
+      const localAbsenceReports = JSON.parse(localStorage.getItem('sma_absence_reports') || '[]');
+      const localAttendance = JSON.parse(localStorage.getItem('sma_attendance') || '[]');
+      return {
+        settings: {
+          startTime: '07:30',
+          lateTime: '07:45',
+          schoolName: 'TRƯỜNG MẦM NON 3 - PHƯỜNG BÀN CỜ TP.HỒ CHÍ MINH',
+          themeColor: 'rose',
+          darkMode: false,
+          ...localSettings
+        },
+        classrooms: localClassrooms,
+        students: localStudents,
+        teachers: localTeachers,
+        parents: localParents,
+        weeklyMenu: localWeeklyMenu,
+        absenceReports: localAbsenceReports,
+        attendance: localAttendance,
+        isOffline: true
+      };
     }
     throw error;
   }
