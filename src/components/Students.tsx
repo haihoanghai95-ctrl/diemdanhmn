@@ -249,13 +249,39 @@ export default function Students({ students, classrooms, saveStudents, settings 
   };
 
   const handleToggleTalentFeePaid = (studentId: string) => {
+    const targetMonth = monthFilter === 'all' ? '2026-07' : monthFilter;
     const updated = students.map(s => {
       if (s.id === studentId) {
-        const nextPaid = !s.talentFeePaid;
+        const currentlyPaid = StorageService.isStudentPaidForMonth(s, targetMonth);
+        const nextPaid = !currentlyPaid;
+        
+        let newPaidMonths = s.paidMonths ? [...s.paidMonths] : [];
+        if (s.talentFeePaid && !s.paidMonths) {
+          const legacyMonth = s.talentFeeDueDate ? s.talentFeeDueDate.substring(0, 7) : '2026-07';
+          newPaidMonths.push(legacyMonth);
+        }
+        
+        if (nextPaid) {
+          if (!newPaidMonths.includes(targetMonth)) {
+            newPaidMonths.push(targetMonth);
+          }
+        } else {
+          newPaidMonths = newPaidMonths.filter(m => m !== targetMonth);
+        }
+        
+        const newPaymentMethodsByMonth = s.paymentMethodsByMonth ? { ...s.paymentMethodsByMonth } : {};
+        if (nextPaid) {
+          newPaymentMethodsByMonth[targetMonth] = s.paymentMethod || 'Chuyển khoản';
+        } else {
+          delete newPaymentMethodsByMonth[targetMonth];
+        }
+
         return {
           ...s,
           talentFeePaid: nextPaid,
-          paymentMethod: nextPaid ? (s.paymentMethod || 'Chuyển khoản') : undefined
+          paymentMethod: nextPaid ? (s.paymentMethod || 'Chuyển khoản') : undefined,
+          paidMonths: newPaidMonths,
+          paymentMethodsByMonth: newPaymentMethodsByMonth
         };
       }
       return s;
@@ -263,11 +289,40 @@ export default function Students({ students, classrooms, saveStudents, settings 
     saveStudents(updated);
     
     if (selectedStudent && selectedStudent.id === studentId) {
-      setSelectedStudent(prev => prev ? { 
-        ...prev, 
-        talentFeePaid: !prev.talentFeePaid,
-        paymentMethod: !prev.talentFeePaid ? (prev.paymentMethod || 'Chuyển khoản') : undefined
-      } : null);
+      setSelectedStudent(prev => {
+        if (!prev) return null;
+        const currentlyPaid = StorageService.isStudentPaidForMonth(prev, targetMonth);
+        const nextPaid = !currentlyPaid;
+        
+        let newPaidMonths = prev.paidMonths ? [...prev.paidMonths] : [];
+        if (prev.talentFeePaid && !prev.paidMonths) {
+          const legacyMonth = prev.talentFeeDueDate ? prev.talentFeeDueDate.substring(0, 7) : '2026-07';
+          newPaidMonths.push(legacyMonth);
+        }
+        
+        if (nextPaid) {
+          if (!newPaidMonths.includes(targetMonth)) {
+            newPaidMonths.push(targetMonth);
+          }
+        } else {
+          newPaidMonths = newPaidMonths.filter(m => m !== targetMonth);
+        }
+        
+        const newPaymentMethodsByMonth = prev.paymentMethodsByMonth ? { ...prev.paymentMethodsByMonth } : {};
+        if (nextPaid) {
+          newPaymentMethodsByMonth[targetMonth] = prev.paymentMethod || 'Chuyển khoản';
+        } else {
+          delete newPaymentMethodsByMonth[targetMonth];
+        }
+
+        return { 
+          ...prev, 
+          talentFeePaid: nextPaid,
+          paymentMethod: nextPaid ? (prev.paymentMethod || 'Chuyển khoản') : undefined,
+          paidMonths: newPaidMonths,
+          paymentMethodsByMonth: newPaymentMethodsByMonth
+        };
+      });
     }
   };
 
@@ -611,6 +666,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
         ]
       ];
 
+      const targetMonth = monthFilter === 'all' ? '2026-07' : monthFilter;
       filteredStudents.forEach(s => {
         const classObj = classrooms.find(c => c.id === s.classId);
         const classNameStr = classObj?.name || 'Chưa xếp lớp';
@@ -624,8 +680,10 @@ export default function Students({ students, classrooms, saveStudents, settings 
         const talentFeeVal = s.talentFee || 0;
         const otherFeeVal = s.otherFee || 0;
         const totalVal = talentFeeVal + otherFeeVal;
-        const statusStr = s.talentFeePaid ? 'Đã đóng' : 'Chưa đóng';
-        const paymentMethodStr = s.talentFeePaid ? (s.paymentMethod || 'Chuyển khoản') : 'Chưa đóng';
+        
+        const isPaid = StorageService.isStudentPaidForMonth(s, targetMonth);
+        const statusStr = isPaid ? 'Đã đóng' : 'Chưa đóng';
+        const paymentMethodStr = isPaid ? (StorageService.getStudentPaymentMethodForMonth(s, targetMonth) || 'Chuyển khoản') : 'Chưa đóng';
 
         dataRows.push([
           s.studentCode,
@@ -658,7 +716,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, "Thanh Toan Hoc Phi");
-      XLSX.writeFile(wb, `bao_cao_dong_phi_${new Date().toISOString().split('T')[0]}.xlsx`);
+      XLSX.writeFile(wb, `bao_cao_dong_phi_${targetMonth}_${new Date().toISOString().split('T')[0]}.xlsx`);
     } catch (e) {
       console.error(e);
       alert('Xuất file Excel thanh toán thất bại.');
@@ -675,6 +733,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
         ? 'Tất cả các tháng' 
         : formatMonthLabel(monthFilter);
 
+      const targetMonth = monthFilter === 'all' ? '2026-07' : monthFilter;
       const schoolNameText = settings.schoolName || 'Trường Mầm Non';
 
       let totalExpected = 0;
@@ -697,8 +756,9 @@ export default function Students({ students, classrooms, saveStudents, settings 
         const otherFeeVal = s.otherFee || 0;
         const totalVal = talentFeeVal + otherFeeVal;
         
+        const isPaid = StorageService.isStudentPaidForMonth(s, targetMonth);
         totalExpected += totalVal;
-        if (s.talentFeePaid) {
+        if (isPaid) {
           totalCollected += totalVal;
           paidCount++;
         } else {
@@ -706,9 +766,9 @@ export default function Students({ students, classrooms, saveStudents, settings 
           unpaidCount++;
         }
 
-        const statusStr = s.talentFeePaid ? 'Đã đóng' : 'Chưa đóng';
-        const statusClass = s.talentFeePaid ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold';
-        const paymentMethodStr = s.talentFeePaid ? (s.paymentMethod || 'Chuyển khoản') : '-';
+        const statusStr = isPaid ? 'Đã đóng' : 'Chưa đóng';
+        const statusClass = isPaid ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold';
+        const paymentMethodStr = isPaid ? (StorageService.getStudentPaymentMethodForMonth(s, targetMonth) || 'Chuyển khoản') : '-';
 
         return `
           <tr>
@@ -1673,12 +1733,12 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                     >
                       <input
                         type="checkbox"
-                        checked={!!s.talentFeePaid}
+                        checked={StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter)}
                         onChange={() => handleToggleTalentFeePaid(s.id)}
                         className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer"
                       />
-                      <span className={`font-bold transition-colors ${s.talentFeePaid ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                        {s.talentFeePaid ? 'Đã đóng' : 'Chưa đóng'}
+                      <span className={`font-bold transition-colors ${StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                        {StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) ? 'Đã đóng' : 'Chưa đóng'}
                       </span>
                     </label>
                   </div>
@@ -1728,7 +1788,7 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  {!s.talentFeePaid && (s.talentFee || 0) > 0 && (
+                  {!StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) && (s.talentFee || 0) > 0 && (
                     <button
                       onClick={() => handleOpenReminder(s)}
                       className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/20 cursor-pointer transition animate-pulse"

@@ -403,7 +403,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       setSelectedClass(cls);
       
       // Load student registered talent subjects and auto-add mandatory ones
-      const registeredIds = selectedStudent.registeredTalentSubjects || [];
+      const registeredIds = StorageService.getStudentRegisteredTalentsForMonth(selectedStudent, simulatedMonth);
       const mandatoryIds = cls?.talentSubjects?.filter(s => s.isMandatory).map(s => s.id) || [];
       const combinedIds = Array.from(new Set([...registeredIds, ...mandatoryIds]));
       
@@ -427,7 +427,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       setAttendanceRecords([]);
       setChildHealthRecords([]);
     }
-  }, [selectedStudent, classrooms]);
+  }, [selectedStudent, classrooms, simulatedMonth]);
 
   // Refresh absence reports list
   const refreshReports = () => {
@@ -489,8 +489,13 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       const allStudents = StorageService.getStudents();
       const updatedStudents = allStudents.map(s => {
         if (s.id === selectedStudent.id) {
+          const map = s.registeredTalentsByMonth || {};
           return {
             ...s,
+            registeredTalentsByMonth: {
+              ...map,
+              [simulatedMonth]: selectedTalentIds
+            },
             registeredTalentSubjects: selectedTalentIds,
             talentFee: totalFee,
             talentLastRegisteredMonth: simulatedMonth,
@@ -645,6 +650,38 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
   const handleConfirmPaymentSent = () => {
     if (!selectedStudent) return;
     
+    const methodLabel = paymentMethod === 'qr' ? 'Chuyển khoản' : 'Tiền mặt';
+    
+    // 1. Cập nhật trạng thái đóng học phí của học sinh trong StorageService
+    const allStudents = StorageService.getStudents();
+    const updatedStudents = allStudents.map(s => {
+      if (s.id === selectedStudent.id) {
+        const paid = s.paidMonths || [];
+        const payMethods = s.paymentMethodsByMonth || {};
+        return {
+          ...s,
+          talentFeePaid: true,
+          paymentMethod: methodLabel,
+          paidMonths: Array.from(new Set([...paid, simulatedMonth])),
+          paymentMethodsByMonth: {
+            ...payMethods,
+            [simulatedMonth]: methodLabel
+          }
+        };
+      }
+      return s;
+    });
+
+    StorageService.saveStudents(updatedStudents);
+
+    // 2. Cập nhật các trạng thái cục bộ để giao diện đổi màu và cập nhật ngay lập tức
+    const updatedSelected = updatedStudents.find(s => s.id === selectedStudent.id) || null;
+    if (updatedSelected) {
+      setSelectedStudent(updatedSelected);
+      setStudents(prev => prev.map(s => s.id === selectedStudent.id ? updatedSelected : s));
+    }
+
+    // 3. Tạo thông báo cho giáo viên chủ nhiệm
     const newNotif: TeacherNotification = {
       id: 'notif_pay_' + Date.now(),
       studentId: selectedStudent.id,
@@ -654,7 +691,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       parentPhone: session.parentPhone || '',
       parentName: session.parentName || 'Phụ huynh',
       type: 'fee_payment',
-      content: `Phụ huynh báo ĐÃ CHUYỂN KHOẢN/THANH TOÁN học phí năng khiếu tháng ${simulatedMonth.split('-')[1]} số tiền ${paymentAmount.toLocaleString('vi-VN')} đ cho bé ${selectedStudent.fullName}.`,
+      content: `Phụ huynh báo ĐÃ THANH TOÁN (${methodLabel}) học phí năng khiếu tháng ${simulatedMonth.split('-')[1]} số tiền ${paymentAmount.toLocaleString('vi-VN')} đ cho bé ${selectedStudent.fullName}.`,
       createdAt: new Date().toISOString(),
       read: false,
       isRead: false,
@@ -663,7 +700,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
     const existingNotifs = StorageService.getTeacherNotifications();
     StorageService.saveTeacherNotifications([newNotif, ...existingNotifs]);
 
-    alert(`Đã gửi thông báo xác nhận thanh toán học phí cho Giáo viên chủ nhiệm lớp ${selectedClass?.name || ''}!`);
+    alert(`Hệ thống đã tự động ghi nhận thanh toán thành công bằng hình thức ${methodLabel} cho bé ${selectedStudent.fullName}! Toàn bộ số tiền đã thu trên cổng quản trị sẽ tự động cập nhật.`);
     setIsPaymentModalOpen(false);
   };
 
@@ -836,7 +873,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       )}
 
       {/* 3. MAIN WORKING ZONE */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto h-screen relative">
+      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto min-h-screen md:h-screen relative">
         
         {/* Top Header navbar */}
         <header className="no-print h-16 sticky top-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/80 px-8 flex items-center justify-between z-20 shrink-0">
@@ -1096,9 +1133,11 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
             {/* Child Specific Info Quick Panel */}
             {selectedStudent && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-gradient-to-r from-emerald-500/5 to-indigo-500/5 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 flex items-center justify-between shadow-xs">
-                  <div className="space-y-1.5 max-w-[70%]">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Trạng Thái Đóng Học Phí & Phí Khác</span>
+                <div className="bg-gradient-to-r from-emerald-500/5 to-indigo-500/5 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+                  <div className="space-y-1.5 w-full sm:max-w-[70%]">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Trạng Thái Đóng Học Phí (Tháng {simulatedMonth.split('-')[1]}/{simulatedMonth.split('-')[0]})
+                    </span>
                     <span className="text-xs font-extrabold text-slate-800 dark:text-white block">
                       Tổng cộng: {((selectedStudent.talentFee || 0) + (selectedStudent.otherFee || 0)).toLocaleString('vi-VN')} đ
                     </span>
@@ -1122,61 +1161,85 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                       )}
                     </div>
                   </div>
-                  <div className="shrink-0 ml-3">
-                    {selectedStudent.talentFeePaid ? (
+                  <div className="shrink-0 sm:ml-3 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2.5 w-full sm:w-auto border-t sm:border-t-0 border-slate-150/40 dark:border-slate-800/40 pt-3 sm:pt-0">
+                    {StorageService.isStudentPaidForMonth(selectedStudent, simulatedMonth) ? (
                       <span className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold px-3 py-1.5 rounded-full border border-emerald-500/10 flex items-center gap-1 whitespace-nowrap">
                         <Check size={13} /> Đã đóng
                       </span>
                     ) : (
-                      <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold px-3 py-1.5 rounded-full border border-amber-500/10 whitespace-nowrap">
-                        Chưa đóng
-                      </span>
+                      <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-end gap-2.5 w-full sm:w-auto">
+                        <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px] font-bold px-2.5 py-1 rounded-full border border-amber-500/10 whitespace-nowrap">
+                          Chưa đóng
+                        </span>
+                        {((selectedStudent.talentFee || 0) + (selectedStudent.otherFee || 0)) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const list = selectedClass?.talentSubjects?.filter(s => StorageService.getStudentRegisteredTalentsForMonth(selectedStudent, simulatedMonth).includes(s.id)) || [];
+                              const talentFee = selectedStudent.talentFee || 0;
+                              const otherFee = selectedStudent.otherFee || 0;
+                              setPaymentAmount(talentFee + otherFee);
+                              setPaymentSubjects(list);
+                              setPaymentMethod('qr');
+                              setIsPaymentModalOpen(true);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl transition shadow-xs hover:shadow-sm cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                          >
+                            <CreditCard size={12} /> Thanh toán
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
 
                 <div className="bg-gradient-to-r from-indigo-500/5 to-purple-500/5 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 flex flex-col justify-between shadow-xs">
                   <div className="space-y-2 w-full">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Lịch Học Năng Khiếu Của Con</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Lịch Học Năng Khiếu (Tháng {simulatedMonth.split('-')[1]}/{simulatedMonth.split('-')[0]})
+                    </span>
                     <div className="space-y-2">
-                      {selectedStudent.registeredTalentSubjects && selectedStudent.registeredTalentSubjects.length > 0 ? (
-                        selectedStudent.registeredTalentSubjects.map(tsId => {
-                          const subj = selectedClass?.talentSubjects?.find(t => t.id === tsId);
-                          if (!subj) return null;
-                          return (
-                            <div key={tsId} className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-indigo-100/60 dark:border-indigo-950/40 space-y-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                              <div className="flex justify-between items-center gap-2">
-                                <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                                  {subj.name}
-                                </span>
-                                <span className="text-[10px] font-extrabold text-slate-600 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-                                  {subj.fee.toLocaleString('vi-VN')} đ
-                                </span>
-                              </div>
-                              {(subj.schedule || subj.timeSlot) && (
-                                <div className="grid grid-cols-1 gap-1 text-[10px] text-slate-500 dark:text-slate-400 border-t border-slate-100/50 dark:border-slate-800/50 pt-1.5 mt-1.5">
-                                  {subj.schedule && (
-                                    <div className="flex items-center gap-1.5">
-                                      <Calendar size={11} className="text-emerald-500 shrink-0" />
-                                      <span>Lịch: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{subj.schedule}</strong></span>
-                                    </div>
-                                  )}
-                                  {subj.timeSlot && (
-                                    <div className="flex items-center gap-1.5">
-                                      <Clock size={11} className="text-amber-500 shrink-0" />
-                                      <span>Giờ: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{subj.timeSlot}</strong></span>
-                                    </div>
-                                  )}
+                      {(() => {
+                        const registeredIds = StorageService.getStudentRegisteredTalentsForMonth(selectedStudent, simulatedMonth);
+                        return registeredIds && registeredIds.length > 0 ? (
+                          registeredIds.map(tsId => {
+                            const subj = selectedClass?.talentSubjects?.find(t => t.id === tsId);
+                            if (!subj) return null;
+                            return (
+                              <div key={tsId} className="bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-indigo-100/60 dark:border-indigo-950/40 space-y-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                                <div className="flex justify-between items-center gap-2">
+                                  <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                                    {subj.name}
+                                  </span>
+                                  <span className="text-[10px] font-extrabold text-slate-600 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                                    {subj.fee.toLocaleString('vi-VN')} đ
+                                  </span>
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-slate-400 dark:text-slate-500 text-[11px] italic py-2">
-                          Chưa đăng ký môn nào cho con
-                        </div>
-                      )}
+                                {(subj.schedule || subj.timeSlot) && (
+                                  <div className="grid grid-cols-1 gap-1 text-[10px] text-slate-500 dark:text-slate-400 border-t border-slate-100/50 dark:border-slate-800/50 pt-1.5 mt-1.5">
+                                    {subj.schedule && (
+                                      <div className="flex items-center gap-1.5">
+                                        <Calendar size={11} className="text-emerald-500 shrink-0" />
+                                        <span>Lịch: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{subj.schedule}</strong></span>
+                                      </div>
+                                    )}
+                                    {subj.timeSlot && (
+                                      <div className="flex items-center gap-1.5">
+                                        <Clock size={11} className="text-amber-500 shrink-0" />
+                                        <span>Giờ: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{subj.timeSlot}</strong></span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-slate-400 dark:text-slate-500 text-[11px] italic py-2">
+                            Chưa đăng ký môn nào cho con
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2553,56 +2616,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
 
                 return (
                   <div className="space-y-6 animate-fade-in">
-                    {/* Header bar */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-xs">
-                      <div>
-                        <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-                          <Activity size={20} className="text-emerald-500" />
-                          Lịch Hoạt Động Lớp {selectedClass.name}
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Xem chương trình sinh hoạt, bài học và hoạt động trong ngày của bé <span className="font-semibold text-emerald-600 dark:text-emerald-400">{selectedStudent.fullName}</span>.
-                        </p>
-                      </div>
-
-                      {/* Date selection controls */}
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handlePrevDay}
-                          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-150 dark:border-slate-800 rounded-xl transition cursor-pointer"
-                        >
-                          <ChevronLeft size={16} className="text-slate-600 dark:text-slate-300" />
-                        </button>
-                        
-                        <input
-                          type="date"
-                          value={selectedActivityDate}
-                          onChange={(e) => setSelectedActivityDate(e.target.value)}
-                          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-150 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
-                        />
-
-                        <button
-                          type="button"
-                          onClick={handleNextDay}
-                          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-150 dark:border-slate-800 rounded-xl transition cursor-pointer"
-                        >
-                          <ChevronRight size={16} className="text-slate-600 dark:text-slate-300" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Timeline box */}
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-xs space-y-6">
-                      <div className="border-b border-slate-100 dark:border-slate-800 pb-4 flex justify-between items-center gap-4">
-                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider whitespace-nowrap">
-                          📅 Khung hoạt động: {formattedDateStr}
-                        </h4>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-full border border-emerald-500/10 whitespace-nowrap shrink-0">
-                          {selectedClass.name}
-                        </span>
-                      </div>
-
-                      {currentClassActivities.length === 0 ? (
+                                          {currentClassActivities.length === 0 ? (
                         <div className="text-center py-12 text-slate-400 flex flex-col items-center justify-center gap-2">
                           <span className="text-3xl">⏰</span>
                           <p className="text-xs font-semibold">Chưa có hoạt động nào được giáo viên cập nhật cho ngày này.</p>
@@ -2660,7 +2674,6 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                         </div>
                       )}
                     </div>
-                  </div>
                 );
               })()}
 
@@ -2711,7 +2724,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:border-rose-500"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:border-rose-500"
                     required
                   />
                 </div>
@@ -2795,226 +2808,230 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
 
       {/* 7. DYNAMIC TALENT REGISTRATION PAYMENT MODAL */}
       {isPaymentModalOpen && selectedStudent && (
-        <div className="fixed inset-0 z-[120] overflow-y-auto flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
           <div className="absolute inset-0" onClick={() => setIsPaymentModalOpen(false)} />
           
-          <div className="relative bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-6 shadow-2xl space-y-5 animate-scale-in text-slate-800 dark:text-slate-100 z-10">
-            <button 
-              onClick={() => setIsPaymentModalOpen(false)} 
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            >
-              <X size={18} />
-            </button>
-
-            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 rounded-2xl shrink-0">
-                <CreditCard size={22} className="animate-pulse" />
+          <div className="relative bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-4 sm:p-6 shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] animate-scale-in text-slate-800 dark:text-slate-100 z-10">
+            {/* Sticky Header */}
+            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 relative shrink-0">
+              <div className="p-2 sm:p-2.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 rounded-2xl shrink-0">
+                <CreditCard size={20} className="animate-pulse" />
               </div>
-              <div>
-                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white uppercase tracking-tight">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xs sm:text-base font-extrabold text-slate-900 dark:text-white uppercase tracking-tight truncate">
                   Thanh Toán Học Phí Năng Khiếu
                 </h3>
                 <span className="text-[10px] text-slate-400 font-bold block">Tháng {simulatedMonth.split('-')[1]}/{simulatedMonth.split('-')[0]}</span>
               </div>
+              <button 
+                onClick={() => setIsPaymentModalOpen(false)} 
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 ml-1"
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            {/* Student details summary */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-150 dark:border-slate-800/80 space-y-2.5 text-xs">
-              <div className="flex justify-between items-center text-slate-500 font-medium">
-                <span>Học sinh:</span>
-                <span className="font-extrabold text-slate-800 dark:text-slate-200">{selectedStudent.fullName}</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-500 font-medium">
-                <span>Môn học đăng ký:</span>
-                <div className="text-right font-bold text-slate-700 dark:text-slate-300">
-                  {paymentSubjects.length > 0 ? (
-                    paymentSubjects.map((s, index) => (
-                      <span key={s.id} className="block">
-                        • {s.name} ({s.fee.toLocaleString('vi-VN')} đ)
-                      </span>
-                    ))
-                  ) : (
-                    <span className="italic text-slate-400">Không có môn nào</span>
-                  )}
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-y-auto py-3 space-y-4 pr-1 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
+              {/* Student details summary */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-150 dark:border-slate-800/80 space-y-2.5 text-xs">
+                <div className="flex justify-between items-center text-slate-500 font-medium">
+                  <span>Học sinh:</span>
+                  <span className="font-extrabold text-slate-800 dark:text-slate-200">{selectedStudent.fullName}</span>
                 </div>
-              </div>
-              {selectedStudent.otherFee !== undefined && selectedStudent.otherFee > 0 && (
-                <div className="flex justify-between items-start text-slate-500 font-medium border-t border-dashed border-slate-200 dark:border-slate-800 pt-2.5">
-                  <span>Khoản phí khác:</span>
-                  <div className="text-right font-bold text-rose-600 dark:text-rose-400">
-                    <span className="block font-extrabold">{selectedStudent.otherFee.toLocaleString('vi-VN')} đ</span>
-                    {selectedStudent.otherFeesList && selectedStudent.otherFeesList.length > 0 ? (
-                      <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal space-y-0.5 mt-1">
-                        {selectedStudent.otherFeesList.map((f, idx) => (
-                          <span key={f.id || idx} className="block">• {f.name} ({f.amount.toLocaleString('vi-VN')} đ)</span>
-                        ))}
-                      </div>
+                <div className="flex justify-between items-center text-slate-500 font-medium">
+                  <span>Môn học đăng ký:</span>
+                  <div className="text-right font-bold text-slate-700 dark:text-slate-300">
+                    {paymentSubjects.length > 0 ? (
+                      paymentSubjects.map((s, index) => (
+                        <span key={s.id} className="block">
+                          • {s.name} ({s.fee.toLocaleString('vi-VN')} đ)
+                        </span>
+                      ))
                     ) : (
-                      selectedStudent.otherFeeDescription && (
-                        <span className="block text-[10px] text-slate-400 dark:text-slate-500 font-normal italic">({selectedStudent.otherFeeDescription})</span>
-                      )
+                      <span className="italic text-slate-400">Không có môn nào</span>
                     )}
                   </div>
                 </div>
-              )}
-              <div className="border-t border-dashed border-slate-200 dark:border-slate-700 pt-2.5 flex justify-between items-center font-extrabold text-slate-900 dark:text-white">
-                <span className="text-xs uppercase">Tổng số tiền / tháng:</span>
-                <span className="text-base text-amber-600 dark:text-amber-400 font-mono">
-                  {paymentAmount.toLocaleString('vi-VN')} đ
-                </span>
-              </div>
-            </div>
-
-            {/* Select payment method tabs */}
-            <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-850 p-1 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('qr')}
-                className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  paymentMethod === 'qr'
-                    ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <QrCode size={14} />
-                <span>Chuyển khoản QR</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('cash')}
-                className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  paymentMethod === 'cash'
-                    ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <Coins size={14} />
-                <span>Tiền mặt</span>
-              </button>
-            </div>
-
-            {/* Payment method content */}
-            {(() => {
-              const payBank = selectedClass?.paymentBank || 'Vietcombank (VCB)';
-              const payAccountNo = selectedClass?.paymentAccountNo || '1023456789';
-              const payAccountName = selectedClass?.paymentAccountName || 'TRUONG MAM NON BAN MAI';
-              const paymentContentText = `HP NK ${selectedStudent.studentCode || 'HS'} ${selectedStudent.fullName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase()} T${simulatedMonth.split('-')[1]}`;
-
-              const getVietQRBankCode = (bankName: string) => {
-                const upper = bankName.toUpperCase();
-                if (upper.includes('VIETCOMBANK') || upper.includes('VCB')) return 'VCB';
-                if (upper.includes('TECHCOMBANK') || upper.includes('TCB')) return 'TCB';
-                if (upper.includes('VIETINBANK') || upper.includes('CTG')) return 'ICB';
-                if (upper.includes('BIDV')) return 'BIDV';
-                if (upper.includes('MBBANK') || upper.includes('MB')) return 'MB';
-                if (upper.includes('AGRIBANK') || upper.includes('VBA')) return 'VBA';
-                if (upper.includes('ACB')) return 'ACB';
-                if (upper.includes('TPBANK') || upper.includes('TPB')) return 'TPB';
-                if (upper.includes('VPBANK') || upper.includes('VPB')) return 'VPB';
-                if (upper.includes('SACOMBANK') || upper.includes('STB')) return 'STB';
-                if (upper.includes('HDBANK') || upper.includes('HDB')) return 'HDB';
-                if (upper.includes('SHB')) return 'SHB';
-                if (upper.includes('VIB')) return 'VIB';
-                return upper.replace(/[^A-Z0-9]/g, '');
-              };
-
-              const bankCode = getVietQRBankCode(payBank);
-
-              return (
-                <div className="space-y-4">
-                  {paymentMethod === 'qr' ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                      <div className="space-y-2 text-xs">
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal mb-2 font-medium">
-                          {selectedClass?.paymentBank ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">🌟 Học phí này sẽ đóng trực tiếp cho tài khoản của Giáo viên lớp ({selectedClass.name}).</span>
-                          ) : (
-                            <span>💡 Vui lòng mở ứng dụng Ngân hàng di động (Mobile Banking) để quét mã QR thanh toán nhanh hoặc thực hiện chuyển khoản thủ công theo thông tin dưới đây:</span>
-                          )}
-                        </p>
-                        
-                        <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-150 dark:border-slate-800/60 space-y-1.5 font-medium text-slate-700 dark:text-slate-300">
-                          <div>
-                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Ngân hàng</span>
-                            <span className="font-extrabold text-slate-800 dark:text-slate-200">{payBank}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Số tài khoản</span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">{payAccountNo}</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(payAccountNo);
-                                  alert('Đã sao chép số tài khoản!');
-                                }}
-                                className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer shrink-0"
-                              >
-                                [Sao chép]
-                              </button>
-                            </div>
-                          </div>
-                          <div>
-                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Tên người thụ hưởng</span>
-                            <span className="font-bold text-slate-800 dark:text-slate-200">{payAccountName}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Nội dung chuyển khoản</span>
-                            <div className="bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg text-[11px] text-amber-700 dark:text-amber-400 font-mono font-bold flex justify-between items-center mt-1">
-                              <span className="select-all">{paymentContentText}</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(paymentContentText);
-                                  alert('Đã sao chép nội dung chuyển khoản!');
-                                }}
-                                className="text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer ml-1 shrink-0"
-                              >
-                                [Copy]
-                              </button>
-                            </div>
-                          </div>
+                {selectedStudent.otherFee !== undefined && selectedStudent.otherFee > 0 && (
+                  <div className="flex justify-between items-start text-slate-500 font-medium border-t border-dashed border-slate-200 dark:border-slate-800 pt-2.5">
+                    <span>Khoản phí khác:</span>
+                    <div className="text-right font-bold text-rose-600 dark:text-rose-400">
+                      <span className="block font-extrabold">{selectedStudent.otherFee.toLocaleString('vi-VN')} đ</span>
+                      {selectedStudent.otherFeesList && selectedStudent.otherFeesList.length > 0 ? (
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal space-y-0.5 mt-1">
+                          {selectedStudent.otherFeesList.map((f, idx) => (
+                            <span key={f.id || idx} className="block">• {f.name} ({f.amount.toLocaleString('vi-VN')} đ)</span>
+                          ))}
                         </div>
-                      </div>
-
-                      <div className="flex flex-col items-center justify-center p-3 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-150 dark:border-slate-800">
-                        <div className="p-3 bg-white rounded-xl shadow-xs border border-slate-100 flex items-center justify-center">
-                          <img
-                            src={`https://img.vietqr.io/image/${bankCode}-${payAccountNo}-compact2.png?amount=${paymentAmount}&addInfo=${encodeURIComponent(paymentContentText)}&accountName=${encodeURIComponent(payAccountName)}`}
-                            alt={`VietQR ${payBank}`}
-                            className="w-48 h-48 object-contain"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-extrabold uppercase mt-3 tracking-wider text-center">
-                          Mã VietQR Tự Động Quét
-                        </span>
-                        <span className="text-[9px] text-slate-400 text-center mt-1">
-                          Mở ứng dụng Ngân hàng của bạn để quét mã
-                        </span>
-                      </div>
+                      ) : (
+                        selectedStudent.otherFeeDescription && (
+                          <span className="block text-[10px] text-slate-400 dark:text-slate-500 font-normal italic">({selectedStudent.otherFeeDescription})</span>
+                        )
+                      )}
                     </div>
-                  ) : (
-                    <div className="p-5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl text-center space-y-3">
-                      <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-xl">
-                        💵
-                      </div>
-                      <div className="space-y-1 max-w-sm mx-auto">
-                        <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 block">Hướng Dẫn Thanh Toán Tiền Mặt</span>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                          Phụ huynh vui lòng nộp tiền mặt trực tiếp tại <strong>Phòng Kế toán của nhà trường</strong> hoặc gửi trực tiếp cho <strong>Giáo viên chủ nhiệm lớp</strong> của con trước ngày <strong>10 hàng tháng</strong>.
-                        </p>
-                        <p className="text-[10px] text-slate-400 italic">
-                          *Nhà trường hoặc Giáo viên lớp sẽ ghi nhận trạng thái đã đóng và gửi biên lai xác nhận ngay khi nhận được tiền mặt.
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  </div>
+                )}
+                <div className="border-t border-dashed border-slate-200 dark:border-slate-700 pt-2.5 flex justify-between items-center font-extrabold text-slate-900 dark:text-white">
+                  <span className="text-xs uppercase">Tổng số tiền / tháng:</span>
+                  <span className="text-base text-amber-600 dark:text-amber-400 font-mono">
+                    {paymentAmount.toLocaleString('vi-VN')} đ
+                  </span>
                 </div>
-              );
-            })()}
+              </div>
 
-            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 font-semibold leading-normal">
+              {/* Select payment method tabs */}
+              <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-850 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('qr')}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    paymentMethod === 'qr'
+                      ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  <QrCode size={14} />
+                  <span>Chuyển khoản QR</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('cash')}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    paymentMethod === 'cash'
+                      ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  <Coins size={14} />
+                  <span>Tiền mặt</span>
+                </button>
+              </div>
+
+              {/* Payment method content */}
+              {(() => {
+                const payBank = selectedClass?.paymentBank || 'Vietcombank (VCB)';
+                const payAccountNo = selectedClass?.paymentAccountNo || '1023456789';
+                const payAccountName = selectedClass?.paymentAccountName || 'TRUONG MAM NON BAN MAI';
+                const paymentContentText = `HP NK ${selectedStudent.studentCode || 'HS'} ${selectedStudent.fullName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase()} T${simulatedMonth.split('-')[1]}`;
+
+                const getVietQRBankCode = (bankName: string) => {
+                  const upper = bankName.toUpperCase();
+                  if (upper.includes('VIETCOMBANK') || upper.includes('VCB')) return 'VCB';
+                  if (upper.includes('TECHCOMBANK') || upper.includes('TCB')) return 'TCB';
+                  if (upper.includes('VIETINBANK') || upper.includes('CTG')) return 'ICB';
+                  if (upper.includes('BIDV')) return 'BIDV';
+                  if (upper.includes('MBBANK') || upper.includes('MB')) return 'MB';
+                  if (upper.includes('AGRIBANK') || upper.includes('VBA')) return 'VBA';
+                  if (upper.includes('ACB')) return 'ACB';
+                  if (upper.includes('TPBANK') || upper.includes('TPB')) return 'TPB';
+                  if (upper.includes('VPBANK') || upper.includes('VPB')) return 'VPB';
+                  if (upper.includes('SACOMBANK') || upper.includes('STB')) return 'STB';
+                  if (upper.includes('HDBANK') || upper.includes('HDB')) return 'HDB';
+                  if (upper.includes('SHB')) return 'SHB';
+                  if (upper.includes('VIB')) return 'VIB';
+                  return upper.replace(/[^A-Z0-9]/g, '');
+                };
+
+                const bankCode = getVietQRBankCode(payBank);
+
+                return (
+                  <div className="space-y-4">
+                    {paymentMethod === 'qr' ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                        <div className="space-y-2 text-xs">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal mb-2 font-medium">
+                            {selectedClass?.paymentBank ? (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">🌟 Học phí này sẽ đóng trực tiếp cho tài khoản của Giáo viên lớp ({selectedClass.name}).</span>
+                            ) : (
+                              <span>💡 Vui lòng mở ứng dụng Ngân hàng di động (Mobile Banking) để quét mã QR thanh toán nhanh hoặc thực hiện chuyển khoản thủ công theo thông tin dưới đây:</span>
+                            )}
+                          </p>
+                          
+                          <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-150 dark:border-slate-800/60 space-y-1.5 font-medium text-slate-700 dark:text-slate-300">
+                            <div>
+                              <span className="text-slate-400 block text-[10px] uppercase font-bold">Ngân hàng</span>
+                              <span className="font-extrabold text-slate-800 dark:text-slate-200">{payBank}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block text-[10px] uppercase font-bold">Số tài khoản</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">{payAccountNo}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(payAccountNo);
+                                    alert('Đã sao chép số tài khoản!');
+                                  }}
+                                  className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer shrink-0"
+                                >
+                                  [Sao chép]
+                                </button>
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block text-[10px] uppercase font-bold">Tên người thụ hưởng</span>
+                              <span className="font-bold text-slate-800 dark:text-slate-200">{payAccountName}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block text-[10px] uppercase font-bold">Nội dung chuyển khoản</span>
+                              <div className="bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg text-[11px] text-amber-700 dark:text-amber-400 font-mono font-bold flex justify-between items-center mt-1">
+                                <span className="select-all">{paymentContentText}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(paymentContentText);
+                                    alert('Đã sao chép nội dung chuyển khoản!');
+                                  }}
+                                  className="text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer ml-1 shrink-0"
+                                >
+                                  [Copy]
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-center justify-center p-3 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-150 dark:border-slate-800">
+                          <div className="p-3 bg-white rounded-xl shadow-xs border border-slate-100 flex items-center justify-center">
+                            <img
+                              src={`https://img.vietqr.io/image/${bankCode}-${payAccountNo}-compact2.png?amount=${paymentAmount}&addInfo=${encodeURIComponent(paymentContentText)}&accountName=${encodeURIComponent(payAccountName)}`}
+                              alt={`VietQR ${payBank}`}
+                              className="w-40 h-40 object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase mt-3 tracking-wider text-center">
+                            Mã VietQR Tự Động Quét
+                          </span>
+                          <span className="text-[9px] text-slate-400 text-center mt-1">
+                            Mở ứng dụng Ngân hàng của bạn để quét mã
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl text-center space-y-3">
+                        <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-xl">
+                          💵
+                        </div>
+                        <div className="space-y-1 max-w-sm mx-auto">
+                          <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 block">Hướng Dẫn Thanh Toán Tiền Mặt</span>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
+                            Phụ huynh vui lòng nộp tiền mặt trực tiếp tại <strong>Phòng Kế toán của nhà trường</strong> hoặc gửi trực tiếp cho <strong>Giáo viên chủ nhiệm lớp</strong> của con trước ngày <strong>10 hàng tháng</strong>.
+                          </p>
+                          <p className="text-[10px] text-slate-400 italic">
+                            *Nhà trường hoặc Giáo viên lớp sẽ ghi nhận trạng thái đã đóng và gửi biên lai xác nhận ngay khi nhận được tiền mặt.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Sticky Footer */}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 font-semibold leading-normal shrink-0">
               <span className="flex items-center gap-1">
                 🛡️ Hệ thống thanh toán bảo mật mầm non
               </span>

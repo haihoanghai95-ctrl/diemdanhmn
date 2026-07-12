@@ -55,6 +55,9 @@ export interface Student {
   talentFeeDueDate?: string; // Hạn đóng học phí năng khiếu (YYYY-MM-DD)
   quickNotes?: string; // Ghi chú nhanh tình hình bé trong ngày
   talentLastRegisteredMonth?: string; // Tháng cuối đăng ký/cập nhật môn năng khiếu (YYYY-MM)
+  paidMonths?: string[]; // Danh sách các tháng đã đóng học phí (YYYY-MM)
+  paymentMethodsByMonth?: Record<string, string>; // Hình thức thanh toán theo tháng (tháng -> hình thức)
+  registeredTalentsByMonth?: Record<string, string[]>; // Danh sách môn học đăng ký theo từng tháng (tháng -> mảng ID môn học)
 }
 
 export type AttendanceStatus = 'present' | 'late' | 'absent';

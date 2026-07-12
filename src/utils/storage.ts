@@ -879,6 +879,50 @@ export class StorageService {
     saveStudentsToFirebase(students).catch(handleSyncCatch);
   }
 
+  public static isStudentPaidForMonth(student: Student, month: string): boolean {
+    if (student.paidMonths && student.paidMonths.includes(month)) {
+      return true;
+    }
+    // Backward compatibility for initial mock data:
+    if (student.talentFeePaid) {
+      const defaultPaidMonth = student.talentFeeDueDate ? student.talentFeeDueDate.substring(0, 7) : '2026-07';
+      if (defaultPaidMonth === month) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public static getStudentPaymentMethodForMonth(student: Student, month: string): string {
+    if (student.paymentMethodsByMonth && student.paymentMethodsByMonth[month]) {
+      return student.paymentMethodsByMonth[month];
+    }
+    if (student.talentFeePaid && student.paymentMethod) {
+      const defaultPaidMonth = student.talentFeeDueDate ? student.talentFeeDueDate.substring(0, 7) : '2026-07';
+      if (defaultPaidMonth === month) {
+        return student.paymentMethod;
+      }
+    }
+    return '';
+  }
+
+  public static getStudentRegisteredTalentsForMonth(student: Student, month: string): string[] {
+    if (student.registeredTalentsByMonth && student.registeredTalentsByMonth[month]) {
+      return student.registeredTalentsByMonth[month];
+    }
+    // Propagate previous months
+    if (student.registeredTalentsByMonth) {
+      const months = Object.keys(student.registeredTalentsByMonth).sort();
+      const pastMonths = months.filter(m => m <= month);
+      if (pastMonths.length > 0) {
+        const latestMonth = pastMonths[pastMonths.length - 1];
+        return student.registeredTalentsByMonth[latestMonth];
+      }
+    }
+    // Fallback to legacy
+    return student.registeredTalentSubjects || [];
+  }
+
   // --- ATTENDANCE ---
   public static getAttendance(): AttendanceRecord[] {
     this.initialize();
