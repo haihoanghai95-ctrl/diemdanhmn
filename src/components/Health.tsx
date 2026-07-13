@@ -345,7 +345,7 @@ export default function Health({ students, classrooms, settings }: HealthProps) 
       
       {/* HEADER SECTION */}
       <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs">
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[280px] md:min-w-[400px]">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
             Quản Lý Sức Khỏe Học Sinh <Heart size={24} className={`text-${accentColor}-500 fill-${accentColor}-500/10 shrink-0`} />
           </h1>

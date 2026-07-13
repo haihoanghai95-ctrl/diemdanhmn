@@ -42,6 +42,7 @@ export default function CameraAttendance({
   settings,
 }: CameraAttendanceProps) {
   const [isActive, setIsActive] = useState(false);
+  const [hasCameraError, setHasCameraError] = useState(false);
   const [autoPilot, setAutoPilot] = useState(true);
   const [mode, setMode] = useState<'face' | 'qr'>('face');
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
@@ -110,6 +111,7 @@ export default function CameraAttendance({
   // Turn on actual Device Camera
   const startScanningSession = async () => {
     setErrorMessage('');
+    setHasCameraError(false);
     setScanState('idle');
     setLastScannedStudent(null);
     setIsActive(true);
@@ -126,6 +128,7 @@ export default function CameraAttendance({
       }
     } catch (e) {
       console.warn('Cannot obtain camera feed:', e);
+      setHasCameraError(true);
       setErrorMessage('Không tìm thấy Camera hoặc trình duyệt bị từ chối quyền truy cập. Hệ thống sẽ bật chế độ quét mô phỏng.');
     }
   };
@@ -141,6 +144,7 @@ export default function CameraAttendance({
       animationFrameRef.current = null;
     }
     setIsActive(false);
+    setHasCameraError(false);
     setScanState('idle');
   };
 
@@ -660,7 +664,7 @@ export default function CameraAttendance({
 
             <div className="relative w-full max-w-[580px] aspect-[4/3] bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-800 shadow-2xl flex items-center justify-center">
               {/* Camera view */}
-              {isActive && (
+              {isActive && !hasCameraError && (
                 <video
                   ref={videoRef}
                   className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
@@ -674,14 +678,54 @@ export default function CameraAttendance({
                 ref={canvasRef}
                 width={500}
                 height={375}
-                className="absolute inset-0 z-10 w-full h-full pointer-events-none"
+                className={`absolute inset-0 z-10 w-full h-full pointer-events-none transition-opacity duration-300 ${isActive && !hasCameraError ? 'opacity-100' : 'opacity-0'}`}
               />
 
               {/* Warning overlay for simulated errors */}
-              {errorMessage && isActive && (
+              {errorMessage && isActive && !hasCameraError && (
                 <div className="absolute inset-x-4 top-4 z-20 p-3 bg-amber-500/95 text-white text-xs rounded-xl flex items-center gap-2 shadow-lg animate-bounce font-bold">
                   <AlertCircle size={16} className="shrink-0" />
                   <span>{errorMessage}</span>
+                </div>
+              )}
+
+              {/* Camera Error / Permission guidance overlay in presentation mode */}
+              {isActive && hasCameraError && (
+                <div className="absolute inset-0 z-20 p-6 bg-slate-900/95 flex flex-col justify-center text-slate-100 space-y-4">
+                  <div className="flex items-center gap-2 text-rose-400 font-bold border-b border-slate-800 pb-3">
+                    <AlertCircle size={20} className="shrink-0 text-rose-500 animate-pulse" />
+                    <span className="text-sm font-black uppercase tracking-wider">MÁY ẢNH ĐANG BỊ TRÌNH DUYỆT CHẶN</span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                    Hệ thống trình chiếu điểm danh không thể truy cập camera do thiếu quyền hoặc thiết bị không khả dụng.
+                  </p>
+                  <div className="bg-slate-950/85 p-4 rounded-xl border border-slate-800 space-y-2 text-xs text-slate-300">
+                    <p className="font-extrabold text-amber-400 flex items-center gap-1">💡 Hướng dẫn cấp quyền nhanh:</p>
+                    <p>1. Tìm biểu tượng <strong className="text-white">Ổ khóa 🔒</strong> ở đầu thanh địa chỉ của trình duyệt.</p>
+                    <p>2. Chuyển trạng thái tùy chọn <strong className="text-white">Máy ảnh (Camera)</strong> sang <strong className="text-emerald-400 font-extrabold">Cho phép (Allow)</strong>.</p>
+                    <p>3. Làm mới trang này <strong className="text-white">(F5)</strong>.</p>
+                  </div>
+                  <div className="flex gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        stopScanningSession();
+                        setTimeout(startScanningSession, 150);
+                      }}
+                      className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer"
+                    >
+                      THỬ KÍCH HOẠT LẠI
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.reload();
+                      }}
+                      className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer"
+                    >
+                      TẢI LẠI TRANG (F5)
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1049,7 +1093,7 @@ export default function CameraAttendance({
           <div className="relative w-full max-w-[500px] aspect-[4/3] bg-slate-950 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl flex items-center justify-center">
             
             {/* Real device stream */}
-            {isActive && (
+            {isActive && !hasCameraError && (
               <video
                 ref={videoRef}
                 className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
@@ -1063,7 +1107,7 @@ export default function CameraAttendance({
               ref={canvasRef}
               width={500}
               height={375}
-              className={`absolute inset-0 z-10 w-full h-full pointer-events-none transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-0'}`}
+              className={`absolute inset-0 z-10 w-full h-full pointer-events-none transition-opacity duration-300 ${isActive && !hasCameraError ? 'opacity-100' : 'opacity-0'}`}
             />
 
             {/* Offline/Blank Screen message */}
@@ -1082,10 +1126,50 @@ export default function CameraAttendance({
             )}
             
             {/* Error alerts overlay */}
-            {errorMessage && isActive && (
+            {errorMessage && isActive && !hasCameraError && (
               <div className="absolute inset-x-4 top-4 z-20 p-3 bg-amber-500/90 backdrop-blur-xs text-white text-xs rounded-xl flex items-center gap-2 shadow-lg animate-bounce">
                 <AlertCircle size={16} className="shrink-0" />
                 <span className="font-medium">{errorMessage}</span>
+              </div>
+            )}
+
+            {/* Camera Error / Permission guidance overlay inside the box */}
+            {isActive && hasCameraError && (
+              <div className="absolute inset-0 z-20 p-5 bg-slate-900/95 flex flex-col justify-center text-slate-200 space-y-3">
+                <div className="flex items-center gap-2 text-amber-400 font-bold border-b border-slate-800 pb-2">
+                  <AlertCircle size={18} className="shrink-0 text-amber-500 animate-pulse" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Lỗi Cấp Quyền Camera Trình Duyệt</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed font-medium">
+                  Trình duyệt đang chặn quyền truy cập máy ảnh hoặc không tìm thấy thiết bị camera hợp lệ.
+                </p>
+                <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 space-y-1.5 text-[10px] text-slate-300">
+                  <p className="font-bold text-amber-400">💡 Hướng dẫn mở khóa camera:</p>
+                  <p>1. Nhấp vào biểu tượng <strong className="text-white">Ổ khóa 🔒</strong> hoặc <strong className="text-white">Máy ảnh 📷</strong> ở góc trái thanh địa chỉ trình duyệt.</p>
+                  <p>2. Chọn mục <strong className="text-white">Máy ảnh (Camera)</strong> và chuyển thành <strong className="text-emerald-400">Cho phép (Allow)</strong>.</p>
+                  <p>3. Nhấp nút <strong className="text-white">Thử lại</strong> hoặc nhấn <strong className="text-white">F5</strong> để làm mới trang.</p>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopScanningSession();
+                      setTimeout(startScanningSession, 150);
+                    }}
+                    className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition cursor-pointer"
+                  >
+                    Thử khởi chạy lại
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.location.reload();
+                    }}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold uppercase tracking-wider transition cursor-pointer"
+                  >
+                    Tải lại trang (F5)
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -735,7 +735,7 @@ export default function Teachers({
     <div className="space-y-6">
       {/* Header and Add Button */}
       <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs">
-        <div>
+        <div className="flex-1 min-w-[280px] md:min-w-[400px]">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
             Quản Lý Giáo Viên <Award className={getThemeTextClass()} size={24} />
           </h1>

@@ -38,6 +38,16 @@ import {
 import { AttendanceRecord, Classroom, Student, AttendanceStatus, SchoolSettings, DailyAssessment, ClassActivity, ParentNotification } from '../types';
 import { StorageService } from '../utils/storage';
 
+const QUICK_NOTE_TEMPLATES = [
+  'Đi trễ',
+  'Quên mang sách',
+  'Được phụ huynh đón sớm',
+  'Nghỉ bệnh',
+  'Có đơn xin phép',
+  'Bé mệt/sốt',
+  'Phụ huynh dặn uống thuốc'
+];
+
 interface AttendanceHistoryProps {
   attendance: AttendanceRecord[];
   classrooms: Classroom[];
@@ -59,9 +69,31 @@ export default function AttendanceHistory({
   const [searchTerm, setSearchTerm] = useState('');
   
   // Filters
+  const [dateFilterType, setDateFilterType] = useState<'single' | 'range'>('single');
   const [dateFilter, setDateFilter] = useState(() => {
     return new Date().toISOString().split('T')[0];
   });
+  const [startDateFilter, setStartDateFilter] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().split('T')[0];
+  });
+  const [endDateFilter, setEndDateFilter] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+
+  const activeWorkDate = useMemo(() => {
+    return dateFilterType === 'single' ? dateFilter : startDateFilter;
+  }, [dateFilter, startDateFilter, dateFilterType]);
+
+  const vietnameseActiveWorkDate = useMemo(() => {
+    const parts = activeWorkDate.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return activeWorkDate;
+  }, [activeWorkDate]);
+
   const [classFilter, setClassFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -92,6 +124,24 @@ export default function AttendanceHistory({
   const [newStatus, setNewStatus] = useState<AttendanceStatus>('present');
   const [newNotes, setNewNotes] = useState('');
 
+  const handleSelectQuickNote = (noteOpt: string) => {
+    setTempNoteText(prev => {
+      const trimmed = prev.trim();
+      if (!trimmed) return noteOpt;
+      if (trimmed.includes(noteOpt)) return prev;
+      return `${trimmed} • ${noteOpt}`;
+    });
+  };
+
+  const handleSelectQuickNoteForModal = (noteOpt: string) => {
+    setNewNotes(prev => {
+      const trimmed = prev.trim();
+      if (!trimmed) return noteOpt;
+      if (trimmed.includes(noteOpt)) return prev;
+      return `${trimmed} • ${noteOpt}`;
+    });
+  };
+
   // Daily Board comments mock state (synchronized with quickNotes / record notes where possible)
   const [commentsState, setCommentsState] = useState<Record<string, { rating: number; text: string }>>({
     'std_1': { rating: 5, text: 'Học tập hăng say, ăn hết suất ăn trưa nhanh nhẹn.' },
@@ -121,7 +171,7 @@ export default function AttendanceHistory({
 
   const classActivities = useMemo(() => {
     const currentClassId = classFilter === 'all' ? (classrooms[0]?.id || '') : classFilter;
-    const filtered = allActivities.filter(a => a.classId === currentClassId && a.date === dateFilter);
+    const filtered = allActivities.filter(a => a.classId === currentClassId && a.date === activeWorkDate);
     
     if (filtered.length === 0) {
       // Create standard initial routines for this class & date dynamically if no record exists
@@ -136,9 +186,9 @@ export default function AttendanceHistory({
       ];
       
       return standardRoutine.map((item, index) => ({
-        id: `act_gen_${currentClassId}_${dateFilter}_${index}`,
+        id: `act_gen_${currentClassId}_${activeWorkDate}_${index}`,
         classId: currentClassId,
-        date: dateFilter,
+        date: activeWorkDate,
         time: item.time,
         title: item.title,
         completed: false
@@ -147,11 +197,11 @@ export default function AttendanceHistory({
     
     // Sort activities by time
     return [...filtered].sort((a, b) => a.time.localeCompare(b.time));
-  }, [allActivities, classFilter, dateFilter, classrooms]);
+  }, [allActivities, classFilter, activeWorkDate, classrooms]);
 
   const handleSaveClassActivities = (updatedList: ClassActivity[]) => {
     const currentClassId = classFilter === 'all' ? (classrooms[0]?.id || '') : classFilter;
-    const remaining = allActivities.filter(a => !(a.classId === currentClassId && a.date === dateFilter));
+    const remaining = allActivities.filter(a => !(a.classId === currentClassId && a.date === activeWorkDate));
     const merged = [...remaining, ...updatedList];
     setAllActivities(merged);
     StorageService.saveClassActivities(merged);
@@ -197,10 +247,14 @@ export default function AttendanceHistory({
     });
   }, [students, classFilter, searchTerm]);
 
-  // Attendance Records for the current selected date
+  // Attendance Records for the current selected date or date range
   const selectedDateRecords = useMemo(() => {
-    return attendance.filter((r) => r.date === dateFilter);
-  }, [attendance, dateFilter]);
+    if (dateFilterType === 'single') {
+      return attendance.filter((r) => r.date === dateFilter);
+    } else {
+      return attendance.filter((r) => r.date >= startDateFilter && r.date <= endDateFilter);
+    }
+  }, [attendance, dateFilter, startDateFilter, endDateFilter, dateFilterType]);
 
   // Kanban Column Data
   const kanbanColumns = useMemo(() => {
@@ -208,8 +262,10 @@ export default function AttendanceHistory({
     const attending: { student: Student; record: AttendanceRecord }[] = [];
     const absent: { student: Student; record: AttendanceRecord }[] = [];
 
+    const activeRecords = attendance.filter((r) => r.date === activeWorkDate);
+
     filteredStudents.forEach((student) => {
-      const rec = selectedDateRecords.find((r) => r.studentId === student.id);
+      const rec = activeRecords.find((r) => r.studentId === student.id);
       if (!rec) {
         unchecked.push(student);
       } else if (rec.status === 'present' || rec.status === 'late') {
@@ -220,7 +276,7 @@ export default function AttendanceHistory({
     });
 
     return { unchecked, attending, absent };
-  }, [filteredStudents, selectedDateRecords]);
+  }, [filteredStudents, attendance, activeWorkDate]);
 
   // Themes helper
   const getThemeTextClass = () => {
@@ -265,13 +321,13 @@ export default function AttendanceHistory({
       studentName: student.fullName,
       classId: student.classId,
       className: classNamesMap[student.classId] || student.className || 'Lớp',
-      date: dateFilter,
+      date: activeWorkDate,
       time: timeStr,
       status,
       notes: ''
     };
 
-    const existingIdx = attendance.findIndex(r => r.studentId === student.id && r.date === dateFilter);
+    const existingIdx = attendance.findIndex(r => r.studentId === student.id && r.date === activeWorkDate);
     let updated = [...attendance];
     if (existingIdx >= 0) {
       updated[existingIdx] = newRecord;
@@ -290,13 +346,13 @@ export default function AttendanceHistory({
       studentName: student.fullName,
       classId: student.classId,
       className: classNamesMap[student.classId] || student.className || 'Lớp',
-      date: dateFilter,
+      date: activeWorkDate,
       time: new Date().toTimeString().split(' ')[0],
       status: 'absent',
       notes: 'Không phép' // Default
     };
 
-    const existingIdx = attendance.findIndex(r => r.studentId === student.id && r.date === dateFilter);
+    const existingIdx = attendance.findIndex(r => r.studentId === student.id && r.date === activeWorkDate);
     let updated = [...attendance];
     if (existingIdx >= 0) {
       updated[existingIdx] = newRecord;
@@ -309,7 +365,7 @@ export default function AttendanceHistory({
   // Toggle excused absence status
   const handleToggleExcuse = (studentId: string) => {
     const updated = attendance.map(r => {
-      if (r.studentId === studentId && r.date === dateFilter) {
+      if (r.studentId === studentId && r.date === activeWorkDate) {
         const isPermitted = r.notes === 'Có phép';
         return {
           ...r,
@@ -325,7 +381,7 @@ export default function AttendanceHistory({
   const handleCheckOut = (studentId: string) => {
     const timeStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     const updated = attendance.map(r => {
-      if (r.studentId === studentId && r.date === dateFilter) {
+      if (r.studentId === studentId && r.date === activeWorkDate) {
         return {
           ...r,
           notes: r.notes ? `${r.notes} • Ra về: ${timeStr}` : `Đã ra về lúc ${timeStr}`
@@ -343,7 +399,7 @@ export default function AttendanceHistory({
   };
 
   const handleSaveInlineNote = (studentId: string) => {
-    const existingIdx = attendance.findIndex(r => r.studentId === studentId && r.date === dateFilter);
+    const existingIdx = attendance.findIndex(r => r.studentId === studentId && r.date === activeWorkDate);
     let updated = [...attendance];
 
     if (existingIdx >= 0) {
@@ -362,7 +418,7 @@ export default function AttendanceHistory({
           studentName: student.fullName,
           classId: student.classId,
           className: classNamesMap[student.classId] || student.className || 'Lớp',
-          date: dateFilter,
+          date: activeWorkDate,
           time: new Date().toTimeString().split(' ')[0],
           status: 'present',
           notes: tempNoteText.trim()
@@ -389,7 +445,7 @@ export default function AttendanceHistory({
         studentName: student.fullName,
         classId: student.classId,
         className: classNamesMap[student.classId] || student.className || 'Lớp',
-        date: dateFilter,
+        date: activeWorkDate,
         time: timeStr,
         status: 'present',
         notes: ''
@@ -403,7 +459,7 @@ export default function AttendanceHistory({
 
   const handleClearAllAttendance = () => {
     if (confirm('Bạn có chắc chắn muốn xóa dữ liệu điểm danh của ngày hôm nay để làm mới?')) {
-      const filtered = attendance.filter(r => r.date !== dateFilter);
+      const filtered = attendance.filter(r => r.date !== activeWorkDate);
       saveAttendance(filtered);
     }
   };
@@ -423,7 +479,11 @@ export default function AttendanceHistory({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `lich_su_diem_danh_${dateFilter}.csv`;
+    if (dateFilterType === 'single') {
+      link.download = `lich_su_diem_danh_${dateFilter}.csv`;
+    } else {
+      link.download = `lich_su_diem_danh_tu_${startDateFilter}_den_${endDateFilter}.csv`;
+    }
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -474,7 +534,7 @@ export default function AttendanceHistory({
     notes: string
   ) => {
     const existingIdx = dailyAssessments.findIndex(
-      a => a.studentId === studentId && a.date === dateFilter
+      a => a.studentId === studentId && a.date === activeWorkDate
     );
 
     const newAssessment: DailyAssessment = {
@@ -482,7 +542,7 @@ export default function AttendanceHistory({
       studentId,
       studentName,
       classId,
-      date: dateFilter,
+      date: activeWorkDate,
       healthStatus,
       diningStatus,
       sleepStatus,
@@ -568,8 +628,8 @@ export default function AttendanceHistory({
   return (
     <div className="space-y-6">
       {/* 1. TOP SUB-TABS (MISA EMIS STYLE NAVIGATION BAR) */}
-      <div className="no-print bg-white dark:bg-slate-900 px-6 py-1.5 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1.5">
+      <div className="no-print bg-white dark:bg-slate-900 px-4 md:px-6 py-2.5 md:py-1.5 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1.5 w-full md:w-auto flex-nowrap">
           {[
             { name: 'Điểm danh', icon: CheckCircle },
             { name: 'Nhận xét', icon: MessageSquare },
@@ -584,7 +644,7 @@ export default function AttendanceHistory({
               <button
                 key={tab.name}
                 onClick={() => setActiveSubTab(tab.name)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
                   isTabActive
                     ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 shadow-xs border border-emerald-100/30'
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
@@ -598,75 +658,133 @@ export default function AttendanceHistory({
         </div>
 
         {/* View Mode Toggle Switch */}
-        <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/40 dark:border-slate-700 shrink-0">
-          <button
-            onClick={() => setViewMode('board')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
-              viewMode === 'board'
-                ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-white shadow-xs'
-                : 'text-slate-500'
-            }`}
-            title="Chế độ Kanban Board"
-          >
-            <Grid size={13} />
-            <span className="hidden sm:inline">Dạng Bảng</span>
-          </button>
-          <button
-            onClick={() => setViewMode('list')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
-              viewMode === 'list'
-                ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-white shadow-xs'
-                : 'text-slate-500'
-            }`}
-            title="Dạng Danh sách"
-          >
-            <List size={13} />
-            <span className="hidden sm:inline">Dạng Bảng Danh sách</span>
-          </button>
-        </div>
+        {activeSubTab === 'Điểm danh' && (
+          <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/40 dark:border-slate-700 shrink-0 self-end md:self-auto">
+            <button
+              onClick={() => setViewMode('board')}
+              className={`px-3.5 py-2 md:py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                viewMode === 'board'
+                  ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-white shadow-xs'
+                  : 'text-slate-500'
+              }`}
+              title="Chế độ Kanban Board"
+            >
+              <Grid size={13} />
+              <span className="inline">Dạng Bảng</span>
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3.5 py-2 md:py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                viewMode === 'list'
+                  ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-white shadow-xs'
+                  : 'text-slate-500'
+              }`}
+              title="Dạng Danh sách"
+            >
+              <List size={13} />
+              <span className="inline">Danh Sách</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 2. FILTER & ACTION HEADER */}
-      <div className="no-print bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs flex flex-col md:flex-row flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3.5 w-full md:w-auto">
-          {/* Quick Date Display & Navigators */}
-          <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1">
-            <span className="text-[11px] font-extrabold text-slate-400 uppercase mr-2 font-mono">Theo ngày</span>
-            
+      <div className="no-print bg-white dark:bg-slate-900 p-4 md:p-5 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap items-center gap-3 w-full lg:w-auto">
+          {/* Toggle Date Filter Mode */}
+          <div className="grid grid-cols-2 lg:flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200/40 dark:border-slate-700 shrink-0 w-full lg:w-auto">
             <button
-              onClick={handlePrevDay}
-              className="p-1 rounded-md text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-              title="Ngày trước"
+              onClick={() => setDateFilterType('single')}
+              className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase transition cursor-pointer text-center ${
+                dateFilterType === 'single'
+                  ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+              }`}
             >
-              <ChevronLeft size={14} />
+              Xem Ngày
             </button>
-            
-            <div className="relative flex items-center px-2 text-slate-800 dark:text-slate-100 text-xs font-bold font-mono">
-              <Calendar size={13} className="mr-1.5 text-emerald-500" />
-              <span>{vietnameseDate}</span>
-              <input
-                type="date"
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-              />
-            </div>
-
             <button
-              onClick={handleNextDay}
-              className="p-1 rounded-md text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-              title="Ngày tiếp theo"
+              onClick={() => setDateFilterType('range')}
+              className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase transition cursor-pointer text-center ${
+                dateFilterType === 'range'
+                  ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+              }`}
             >
-              <ChevronRight size={14} />
+              Khoảng ngày
             </button>
           </div>
 
+          {/* Date Selector depending on Mode */}
+          {dateFilterType === 'single' ? (
+            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 select-none w-full lg:w-auto">
+              <button
+                onClick={handlePrevDay}
+                className="p-1.5 rounded-md text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                title="Ngày trước"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              
+              <div className="relative flex-1 flex items-center justify-center px-2 text-slate-800 dark:text-slate-100 text-xs font-bold font-mono">
+                <Calendar size={13} className="mr-1.5 text-emerald-500" />
+                <span>{vietnameseDate}</span>
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+              </div>
+
+              <button
+                onClick={handleNextDay}
+                className="p-1.5 rounded-md text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                title="Ngày tiếp theo"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 gap-2 select-none w-full lg:w-auto">
+              <div className="relative flex-1 flex items-center justify-center px-1 text-slate-800 dark:text-slate-100 text-xs font-bold font-mono">
+                <Calendar size={13} className="mr-1.5 text-emerald-500" />
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase mr-1">Từ:</span>
+                <span>{(() => {
+                  const parts = startDateFilter.split('-');
+                  return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : startDateFilter;
+                })()}</span>
+                <input
+                  type="date"
+                  value={startDateFilter}
+                  onChange={(e) => setStartDateFilter(e.target.value)}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+              </div>
+              <span className="text-slate-300 dark:text-slate-600 font-bold">➔</span>
+              <div className="relative flex-1 flex items-center justify-center px-1 text-slate-800 dark:text-slate-100 text-xs font-bold font-mono">
+                <Calendar size={13} className="mr-1.5 text-emerald-500" />
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase mr-1">Đến:</span>
+                <span>{(() => {
+                  const parts = endDateFilter.split('-');
+                  return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : endDateFilter;
+                })()}</span>
+                <input
+                  type="date"
+                  value={endDateFilter}
+                  onChange={(e) => setEndDateFilter(e.target.value)}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Class selection with Emerald glow */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full lg:w-auto">
             <select
               value={classFilter}
               onChange={(e) => setClassFilter(e.target.value)}
-              className="px-3.5 py-2 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/50 dark:border-emerald-900/30 rounded-xl text-xs font-bold text-emerald-700 dark:text-emerald-400 outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full lg:w-auto px-3.5 py-2.5 lg:py-2 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100/50 dark:border-emerald-900/30 rounded-xl text-xs font-bold text-emerald-700 dark:text-emerald-400 outline-none focus:ring-1 focus:ring-emerald-500"
             >
               <option value="all">Tất cả lớp học</option>
               {classrooms.map((c) => (
@@ -678,7 +796,7 @@ export default function AttendanceHistory({
           </div>
 
           {/* Search bar inside header */}
-          <div className="relative flex-1 min-w-[180px] sm:max-w-xs">
+          <div className="relative w-full lg:max-w-xs">
             <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
               <Search size={14} />
             </span>
@@ -687,51 +805,93 @@ export default function AttendanceHistory({
               placeholder="Tìm kiếm học sinh..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-8.5 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs font-medium text-slate-700 dark:text-slate-200"
+              className="w-full pl-8.5 pr-3 py-2.5 lg:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs font-medium text-slate-700 dark:text-slate-200"
             />
           </div>
         </div>
 
         {/* Toolbar action buttons */}
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-stretch lg:justify-end">
           {activeSubTab === 'Điểm danh' && viewMode === 'board' && (
-            <>
+            <div className="grid grid-cols-2 gap-2 w-full lg:contents">
               <button
                 onClick={handleMarkAllAttending}
                 disabled={kanbanColumns.unchecked.length === 0}
-                className="px-3 py-2 border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-50 text-emerald-600 dark:border-emerald-900/30 dark:bg-emerald-950/20 dark:text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
+                className="px-3 py-2.5 border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-50 text-emerald-600 dark:border-emerald-900/30 dark:bg-emerald-950/20 dark:text-emerald-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
               >
                 <Check size={14} />
-                <span>Có mặt tất cả lớp</span>
+                <span>Có mặt cả lớp</span>
               </button>
               <button
                 onClick={handleClearAllAttendance}
-                className="px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-500 dark:border-slate-800 dark:hover:bg-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-500 dark:border-slate-800 dark:hover:bg-slate-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
                 <X size={14} />
                 <span>Làm mới ngày</span>
               </button>
-            </>
+            </div>
           )}
 
           <button
             onClick={handleExportCSV}
-            className="px-3 py-2 border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
+            className="w-full lg:w-auto px-3 py-2.5 border border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1.5 transition cursor-pointer"
           >
             <FileSpreadsheet size={14} className="text-emerald-500" />
-            <span className="hidden sm:inline">Xuất File Excel</span>
+            <span>Xuất File Excel</span>
           </button>
         </div>
       </div>
 
       {/* 3. CORE SUB-TABS DYNAMIC VIEW RENDERER */}
+      {dateFilterType === 'range' && activeSubTab !== 'Điểm danh' && (
+        <div className="no-print bg-amber-50/65 dark:bg-amber-950/15 border border-amber-150 dark:border-amber-950/35 rounded-xl p-3.5 flex items-center gap-2.5 text-xs text-amber-800 dark:text-amber-300">
+          <span className="text-base animate-bounce">💡</span>
+          <p>
+            Bạn đang chọn lọc dữ liệu theo <b>khoảng ngày</b>. Để đồng bộ, các thông tin sinh hoạt và đánh giá dưới đây đang hiển thị cho ngày đầu tiên trong khoảng: <strong className="font-mono bg-amber-100 dark:bg-amber-950/50 px-2 py-0.5 rounded text-[11px]">{vietnameseActiveWorkDate}</strong>.
+          </p>
+        </div>
+      )}
 
       {/* A. ATTENDANCE SUB-TAB (MAIN CONTENT) */}
       {activeSubTab === 'Điểm danh' && (
         <>
           {viewMode === 'board' ? (
             /* KANBAN BOARD LAYOUT */
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+            dateFilterType === 'range' ? (
+              <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center max-w-xl mx-auto my-12 space-y-4 shadow-sm">
+                <div className="w-16 h-16 bg-amber-50 dark:bg-amber-950/20 text-amber-500 rounded-full flex items-center justify-center mx-auto text-3xl">
+                  ⚠️
+                </div>
+                <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">
+                  Chế độ bảng (Kanban) không khả dụng khi xem khoảng ngày
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Bảng điểm danh nhanh (Kanban) chỉ hiển thị trạng thái điểm danh cho một ngày duy nhất. Để xem lịch sử của khoảng ngày từ <b>{(() => {
+                    const parts = startDateFilter.split('-');
+                    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : startDateFilter;
+                  })()}</b> đến <b>{(() => {
+                    const parts = endDateFilter.split('-');
+                    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : endDateFilter;
+                  })()}</b>, vui lòng chuyển sang <b>Dạng Bảng Danh sách</b>.
+                </p>
+                <div className="pt-2 flex justify-center gap-3">
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                  >
+                    <List size={14} />
+                    <span>Chuyển sang Dạng Danh Sách</span>
+                  </button>
+                  <button
+                    onClick={() => setDateFilterType('single')}
+                    className="px-4 py-2 border border-slate-200 hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition cursor-pointer"
+                  >
+                    <span>Xem Theo Ngày</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
               {/* COLUMN 1: CHƯA ĐIỂM DANH */}
               <div className="bg-[#fffbeb] dark:bg-slate-900/40 rounded-2xl border border-amber-100 dark:border-amber-950/30 overflow-hidden flex flex-col shadow-xs min-h-[450px]">
                 {/* Column Header */}
@@ -774,28 +934,44 @@ export default function AttendanceHistory({
 
                         {/* Inline Note Text box */}
                         {editingNoteStudentId === student.id ? (
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <input
-                              type="text"
-                              value={tempNoteText}
-                              onChange={(e) => setTempNoteText(e.target.value)}
-                              placeholder="Nhập ghi chú cho bé..."
-                              className="flex-1 px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] outline-none text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-800"
-                              onKeyDown={(e) => e.key === 'Enter' && handleSaveInlineNote(student.id)}
-                              autoFocus
-                            />
-                            <button
-                              onClick={() => handleSaveInlineNote(student.id)}
-                              className="p-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer"
-                            >
-                              <Check size={12} />
-                            </button>
-                            <button
-                              onClick={() => setEditingNoteStudentId(null)}
-                              className="p-1.5 rounded-lg bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-300 cursor-pointer"
-                            >
-                              <X size={12} />
-                            </button>
+                          <div className="space-y-1.5 mt-1">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={tempNoteText}
+                                onChange={(e) => setTempNoteText(e.target.value)}
+                                placeholder="Nhập ghi chú cho bé..."
+                                className="flex-1 px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] outline-none text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-800"
+                                onKeyDown={(e) => e.key === 'Enter' && handleSaveInlineNote(student.id)}
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleSaveInlineNote(student.id)}
+                                className="p-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer"
+                              >
+                                <Check size={12} />
+                              </button>
+                              <button
+                                onClick={() => setEditingNoteStudentId(null)}
+                                className="p-1.5 rounded-lg bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-300 cursor-pointer"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                            
+                            {/* Quick Notes Selection */}
+                            <div className="flex flex-wrap gap-1">
+                              {QUICK_NOTE_TEMPLATES.map((noteOpt) => (
+                                <button
+                                  key={noteOpt}
+                                  type="button"
+                                  onClick={() => handleSelectQuickNote(noteOpt)}
+                                  className="px-2 py-0.5 text-[9px] font-bold bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 border border-slate-200/50 dark:border-slate-700/50 rounded-md cursor-pointer transition select-none"
+                                >
+                                  +{noteOpt}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         ) : (
                           <button
@@ -907,28 +1083,44 @@ export default function AttendanceHistory({
 
                         {/* Notes Section */}
                         {editingNoteStudentId === student.id ? (
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <input
-                              type="text"
-                              value={tempNoteText}
-                              onChange={(e) => setTempNoteText(e.target.value)}
-                              placeholder="Nhập ghi chú cho bé..."
-                              className="flex-1 px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] outline-none text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-800"
-                              onKeyDown={(e) => e.key === 'Enter' && handleSaveInlineNote(student.id)}
-                              autoFocus
-                            />
-                            <button
-                              onClick={() => handleSaveInlineNote(student.id)}
-                              className="p-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer"
-                            >
-                              <Check size={12} />
-                            </button>
-                            <button
-                              onClick={() => setEditingNoteStudentId(null)}
-                              className="p-1.5 rounded-lg bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-300 cursor-pointer"
-                            >
-                              <X size={12} />
-                            </button>
+                          <div className="space-y-1.5 mt-1">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={tempNoteText}
+                                onChange={(e) => setTempNoteText(e.target.value)}
+                                placeholder="Nhập ghi chú cho bé..."
+                                className="flex-1 px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] outline-none text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-800"
+                                onKeyDown={(e) => e.key === 'Enter' && handleSaveInlineNote(student.id)}
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleSaveInlineNote(student.id)}
+                                className="p-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer"
+                              >
+                                <Check size={12} />
+                              </button>
+                              <button
+                                onClick={() => setEditingNoteStudentId(null)}
+                                className="p-1.5 rounded-lg bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-300 cursor-pointer"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                            
+                            {/* Quick Notes Selection */}
+                            <div className="flex flex-wrap gap-1">
+                              {QUICK_NOTE_TEMPLATES.map((noteOpt) => (
+                                <button
+                                  key={noteOpt}
+                                  type="button"
+                                  onClick={() => handleSelectQuickNote(noteOpt)}
+                                  className="px-2 py-0.5 text-[9px] font-bold bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 border border-slate-200/50 dark:border-slate-700/50 rounded-md cursor-pointer transition select-none"
+                                >
+                                  +{noteOpt}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         ) : (
                           <div className="flex items-center justify-between text-[11px]">
@@ -1022,28 +1214,44 @@ export default function AttendanceHistory({
 
                         {/* Inline Note text box */}
                         {editingNoteStudentId === student.id ? (
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <input
-                              type="text"
-                              value={tempNoteText}
-                              onChange={(e) => setTempNoteText(e.target.value)}
-                              placeholder="Nhập lý do nghỉ học..."
-                              className="flex-1 px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] outline-none text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-800"
-                              onKeyDown={(e) => e.key === 'Enter' && handleSaveInlineNote(student.id)}
-                              autoFocus
-                            />
-                            <button
-                              onClick={() => handleSaveInlineNote(student.id)}
-                              className="p-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer"
-                            >
-                              <Check size={12} />
-                            </button>
-                            <button
-                              onClick={() => setEditingNoteStudentId(null)}
-                              className="p-1.5 rounded-lg bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-300 cursor-pointer"
-                            >
-                              <X size={12} />
-                            </button>
+                          <div className="space-y-1.5 mt-1">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={tempNoteText}
+                                onChange={(e) => setTempNoteText(e.target.value)}
+                                placeholder="Nhập lý do nghỉ học..."
+                                className="flex-1 px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] outline-none text-slate-800 dark:text-white bg-slate-50 dark:bg-slate-800"
+                                onKeyDown={(e) => e.key === 'Enter' && handleSaveInlineNote(student.id)}
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => handleSaveInlineNote(student.id)}
+                                className="p-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer"
+                              >
+                                <Check size={12} />
+                              </button>
+                              <button
+                                onClick={() => setEditingNoteStudentId(null)}
+                                className="p-1.5 rounded-lg bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 hover:bg-slate-300 cursor-pointer"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                            
+                            {/* Quick Notes Selection */}
+                            <div className="flex flex-wrap gap-1">
+                              {QUICK_NOTE_TEMPLATES.map((noteOpt) => (
+                                <button
+                                  key={noteOpt}
+                                  type="button"
+                                  onClick={() => handleSelectQuickNote(noteOpt)}
+                                  className="px-2 py-0.5 text-[9px] font-bold bg-slate-100 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 border border-slate-200/50 dark:border-slate-700/50 rounded-md cursor-pointer transition select-none"
+                                >
+                                  +{noteOpt}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         ) : (
                           <div className="flex items-center justify-between text-[11px]">
@@ -1077,106 +1285,206 @@ export default function AttendanceHistory({
                   )}
                 </div>
               </div>
-            </div>
+            </div>)
           ) : (
-            /* DETAILED LIST TABLE VIEW */
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-150 dark:border-slate-800/80 shadow-xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
-                      <th className="py-3.5 px-4">Học Sinh</th>
-                      <th className="py-3.5 px-3">Lớp</th>
-                      <th className="py-3.5 px-3 text-center">Ngày ghi nhận</th>
-                      <th className="py-3.5 px-3 text-center">Giờ quét</th>
-                      <th className="py-3.5 px-3">Trạng thái</th>
-                      <th className="py-3.5 px-3">Ghi chú / Giao tiếp</th>
-                      <th className="py-3.5 px-4 text-right no-print">Công cụ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium text-slate-700 dark:text-slate-200">
-                    {selectedDateRecords.length > 0 ? (
-                      selectedDateRecords.map((rec) => (
-                        <tr key={rec.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
-                                <img
-                                  src={rec.photoCaptured || StorageService.getNewAvatar(rec.studentName, rec.studentName.charCodeAt(0))}
-                                  alt={rec.studentName}
-                                  referrerPolicy="no-referrer"
-                                  className="w-full h-full object-cover"
-                                />
+            /* DETAILED LIST TABLE & CARD VIEW */
+            <div className="space-y-4">
+              {/* Desktop view (Table format) */}
+              <div className="hidden md:block bg-white dark:bg-slate-900 rounded-2xl border border-slate-150 dark:border-slate-800/80 shadow-xs overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
+                        <th className="py-3.5 px-4">Học Sinh</th>
+                        <th className="py-3.5 px-3">Lớp</th>
+                        <th className="py-3.5 px-3 text-center">Ngày ghi nhận</th>
+                        <th className="py-3.5 px-3 text-center">Giờ quét</th>
+                        <th className="py-3.5 px-3">Trạng thái</th>
+                        <th className="py-3.5 px-3">Ghi chú / Giao tiếp</th>
+                        <th className="py-3.5 px-4 text-right no-print">Công cụ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium text-slate-700 dark:text-slate-200">
+                      {selectedDateRecords.length > 0 ? (
+                        selectedDateRecords.map((rec) => (
+                          <tr key={rec.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
+                                  <img
+                                    src={rec.photoCaptured || StorageService.getNewAvatar(rec.studentName, rec.studentName.charCodeAt(0))}
+                                    alt={rec.studentName}
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                                <div>
+                                  <div className="font-bold text-slate-800 dark:text-white">{rec.studentName}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono">Mã: {rec.studentCode}</div>
+                                </div>
                               </div>
-                              <div>
-                                <div className="font-bold text-slate-800 dark:text-white">{rec.studentName}</div>
-                                <div className="text-[10px] text-slate-400 font-mono">Mã: {rec.studentCode}</div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold">
+                                {rec.className}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-center text-slate-600 dark:text-slate-300 font-mono font-bold">
+                              {new Date(rec.date).toLocaleDateString('vi-VN')}
+                            </td>
+                            <td className="py-3 px-3 text-center text-slate-600 dark:text-slate-300 font-mono">
+                              {rec.time}
+                            </td>
+                            <td className="py-3 px-3">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  rec.status === 'present'
+                                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/35 dark:text-emerald-400'
+                                    : rec.status === 'late'
+                                    ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/35 dark:text-amber-400'
+                                    : 'bg-rose-50 text-rose-600 dark:bg-rose-950/35 dark:text-rose-400'
+                                }`}
+                              >
+                                {rec.status === 'present' && <CheckCircle size={10} />}
+                                {rec.status === 'late' && <Clock size={10} />}
+                                {rec.status === 'absent' && <XCircle size={10} />}
+                                <span>{rec.status === 'present' ? 'Đúng giờ' : rec.status === 'late' ? 'Đi muộn' : 'Vắng mặt'}</span>
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-slate-500 dark:text-slate-400 font-normal">
+                              {rec.notes || <span className="italic text-slate-300">Không có ghi chú</span>}
+                            </td>
+                            <td className="py-3 px-4 text-right no-print">
+                              <div className="flex justify-end gap-1">
+                                <button
+                                  onClick={() => handleOpenEditStatus(rec)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition cursor-pointer"
+                                  title="Sửa trạng thái"
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteRecord(rec.id, rec.studentName, rec.date)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
+                                  title="Xóa"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
-                            </div>
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold">
-                              {rec.className}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-center text-slate-600 dark:text-slate-300 font-mono font-bold">
-                            {new Date(rec.date).toLocaleDateString('vi-VN')}
-                          </td>
-                          <td className="py-3 px-3 text-center text-slate-600 dark:text-slate-300 font-mono">
-                            {rec.time}
-                          </td>
-                          <td className="py-3 px-3">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                rec.status === 'present'
-                                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/35 dark:text-emerald-400'
-                                  : rec.status === 'late'
-                                  ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/35 dark:text-amber-400'
-                                  : 'bg-rose-50 text-rose-600 dark:bg-rose-950/35 dark:text-rose-400'
-                              }`}
-                            >
-                              {rec.status === 'present' && <CheckCircle size={10} />}
-                              {rec.status === 'late' && <Clock size={10} />}
-                              {rec.status === 'absent' && <XCircle size={10} />}
-                              <span>{rec.status === 'present' ? 'Đúng giờ' : rec.status === 'late' ? 'Đi muộn' : 'Vắng mặt'}</span>
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-slate-500 dark:text-slate-400 font-normal">
-                            {rec.notes || <span className="italic text-slate-300">Không có ghi chú</span>}
-                          </td>
-                          <td className="py-3 px-4 text-right no-print">
-                            <div className="flex justify-end gap-1">
-                              <button
-                                onClick={() => handleOpenEditStatus(rec)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition cursor-pointer"
-                                title="Sửa trạng thái"
-                              >
-                                <Edit size={14} />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteRecord(rec.id, rec.studentName, rec.date)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
-                                title="Xóa"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="text-center py-16 text-slate-400 space-y-2">
+                            <History size={40} className="mx-auto text-slate-300 stroke-1" />
+                            <p className="font-bold text-slate-500 dark:text-slate-400">Không có bản ghi điểm danh nào hôm nay</p>
+                            <p className="text-[11px] text-slate-400 max-w-xs mx-auto leading-normal">
+                              Chưa có dữ liệu nào quét camera hoặc điểm diện trong ngày này. Hãy chuyển sang Chế độ dạng bảng để thêm nhanh.
+                            </p>
                           </td>
                         </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={7} className="text-center py-16 text-slate-400 space-y-2">
-                          <History size={40} className="mx-auto text-slate-300 stroke-1" />
-                          <p className="font-bold text-slate-500 dark:text-slate-400">Không có bản ghi điểm danh nào hôm nay</p>
-                          <p className="text-[11px] text-slate-400 max-w-xs mx-auto leading-normal">
-                            Chưa có dữ liệu nào quét camera hoặc điểm diện trong ngày này. Hãy chuyển sang Chế độ dạng bảng để thêm nhanh.
-                          </p>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Mobile view (Card list format) */}
+              <div className="block md:hidden space-y-3">
+                {selectedDateRecords.length > 0 ? (
+                  selectedDateRecords.map((rec) => (
+                    <div
+                      key={rec.id}
+                      className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-150 dark:border-slate-800 shadow-xs space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
+                            <img
+                              src={rec.photoCaptured || StorageService.getNewAvatar(rec.studentName, rec.studentName.charCodeAt(0))}
+                              alt={rec.studentName}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div>
+                            <div className="font-bold text-xs text-slate-800 dark:text-white">{rec.studentName}</div>
+                            <div className="text-[9px] text-slate-400 font-mono font-bold">MSHS: {rec.studentCode}</div>
+                          </div>
+                        </div>
+
+                        <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/45 text-blue-600 dark:text-blue-400 font-extrabold text-[9.5px]">
+                          Lớp {rec.className}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-850 p-2.5 rounded-xl text-[10.5px]">
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase font-bold">Ngày nhận</span>
+                          <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {new Date(rec.date).toLocaleDateString('vi-VN')}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase font-bold">Giờ ghi nhận</span>
+                          <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{rec.time}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase font-bold mb-1">Trạng thái</span>
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              rec.status === 'present'
+                                ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/35 dark:text-emerald-400'
+                                : rec.status === 'late'
+                                ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/35 dark:text-amber-400'
+                                : 'bg-rose-50 text-rose-600 dark:bg-rose-950/35 dark:text-rose-400'
+                            }`}
+                          >
+                            {rec.status === 'present' && <CheckCircle size={10} />}
+                            {rec.status === 'late' && <Clock size={10} />}
+                            {rec.status === 'absent' && <XCircle size={10} />}
+                            <span>{rec.status === 'present' ? 'Đúng giờ' : rec.status === 'late' ? 'Đi muộn' : 'Vắng mặt'}</span>
+                          </span>
+                        </div>
+
+                        <div className="flex gap-2 no-print">
+                          <button
+                            onClick={() => handleOpenEditStatus(rec)}
+                            className="p-2 rounded-xl text-slate-500 hover:text-blue-600 bg-slate-100 hover:bg-blue-50 dark:bg-slate-800 dark:hover:bg-blue-950/30 transition cursor-pointer"
+                            title="Sửa trạng thái"
+                          >
+                            <Edit size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRecord(rec.id, rec.studentName, rec.date)}
+                            className="p-2 rounded-xl text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/30 transition cursor-pointer"
+                            title="Xóa"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {rec.notes && (
+                        <div className="border-t border-slate-100 dark:border-slate-850 pt-2 text-[11px] text-slate-500 dark:text-slate-400 italic">
+                          📝 {rec.notes}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-150 dark:border-slate-800 p-8 text-center space-y-2">
+                    <History size={36} className="mx-auto text-slate-300 stroke-1" />
+                    <p className="font-extrabold text-xs text-slate-500">Không có bản ghi điểm danh</p>
+                    <p className="text-[10px] text-slate-400 leading-normal">
+                      Chưa có dữ liệu nào quét camera hoặc điểm diện trong ngày này. Hãy chuyển sang Chế độ dạng bảng để thêm nhanh.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1255,7 +1563,7 @@ export default function AttendanceHistory({
           <div className="flex justify-between items-center flex-wrap gap-2">
             <div>
               <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">
-                🍲 Kiểm tra Dinh dưỡng & Bán trú ngày {vietnameseDate}
+                🍲 Kiểm tra Dinh dưỡng & Bán trú ngày {vietnameseActiveWorkDate}
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 Ghi chép lượng ăn uống thực tế của các bé trong 3 bữa (Ăn sáng, Ăn trưa, Bữa xế chiều).
@@ -1275,7 +1583,8 @@ export default function AttendanceHistory({
             </button>
           </div>
 
-          <div className="overflow-x-auto border border-slate-100 dark:border-slate-800 rounded-2xl">
+          {/* Desktop view (Table format) */}
+          <div className="hidden md:block overflow-x-auto border border-slate-100 dark:border-slate-800 rounded-2xl bg-white dark:bg-slate-900">
             <table className="w-full text-xs text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-150">
@@ -1286,16 +1595,16 @@ export default function AttendanceHistory({
                   <th className="p-3.5 text-right pr-5">Nhận xét dinh dưỡng</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300 font-medium">
                 {filteredStudents.map((s) => {
                   const check = boardingMeals[s.id] || { breakfast: false, lunch: false, snack: false };
                   return (
-                    <tr key={s.id} className="hover:bg-slate-55">
+                    <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-850/30">
                       <td className="p-3 pl-5">
                         <div className="flex items-center gap-3">
-                          <img src={s.avatar || StorageService.getNewAvatar(s.fullName, s.fullName.charCodeAt(0))} className="w-8 h-8 rounded-full object-cover border" alt="Avatar" />
+                          <img src={s.avatar || StorageService.getNewAvatar(s.fullName, s.fullName.charCodeAt(0))} className="w-8 h-8 rounded-full object-cover border border-slate-100" alt="Avatar" />
                           <div>
-                            <p className="font-bold">{s.fullName}</p>
+                            <p className="font-bold text-slate-800 dark:text-white">{s.fullName}</p>
                             <span className="text-[10px] text-slate-400 font-mono">{s.studentCode}</span>
                           </div>
                         </div>
@@ -1344,6 +1653,100 @@ export default function AttendanceHistory({
               </tbody>
             </table>
           </div>
+
+          {/* Mobile view (Card grid with touch controls) */}
+          <div className="block md:hidden space-y-4">
+            {filteredStudents.map((s) => {
+              const check = boardingMeals[s.id] || { breakfast: false, lunch: false, snack: false };
+              return (
+                <div
+                  key={s.id}
+                  className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-150 dark:border-slate-800 shadow-xs space-y-3.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={s.avatar || StorageService.getNewAvatar(s.fullName, s.fullName.charCodeAt(0))}
+                        className="w-10 h-10 rounded-full object-cover border border-slate-100"
+                        alt="Avatar"
+                      />
+                      <div>
+                        <p className="font-bold text-xs text-slate-800 dark:text-white">{s.fullName}</p>
+                        <span className="text-[9px] text-slate-400 font-mono">MSHS: {s.studentCode}</span>
+                      </div>
+                    </div>
+
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                      check.breakfast && check.lunch && check.snack
+                        ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                        : 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
+                    }`}>
+                      {check.breakfast && check.lunch && check.snack ? '🍲 Hoàn thành' : '⚠️ Thiếu bữa'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBoardingMeals(prev => ({
+                        ...prev,
+                        [s.id]: { ...check, breakfast: !check.breakfast }
+                      }))}
+                      className={`py-2 px-1.5 rounded-xl font-bold text-[10px] border flex flex-col items-center gap-1 cursor-pointer transition ${
+                        check.breakfast
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/35'
+                          : 'bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-800/60 dark:border-slate-700 dark:text-slate-400'
+                      }`}
+                    >
+                      <span className="text-[11px]">☀️</span>
+                      <span>Sáng</span>
+                      <span className="text-[8.5px] uppercase font-black tracking-wider mt-0.5">
+                        {check.breakfast ? 'Có Ăn ✔️' : 'Không'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBoardingMeals(prev => ({
+                        ...prev,
+                        [s.id]: { ...check, lunch: !check.lunch }
+                      }))}
+                      className={`py-2 px-1.5 rounded-xl font-bold text-[10px] border flex flex-col items-center gap-1 cursor-pointer transition ${
+                        check.lunch
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/35'
+                          : 'bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-800/60 dark:border-slate-700 dark:text-slate-400'
+                      }`}
+                    >
+                      <span className="text-[11px]">🍲</span>
+                      <span>Trưa</span>
+                      <span className="text-[8.5px] uppercase font-black tracking-wider mt-0.5">
+                        {check.lunch ? 'Có Ăn ✔️' : 'Không'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBoardingMeals(prev => ({
+                        ...prev,
+                        [s.id]: { ...check, snack: !check.snack }
+                      }))}
+                      className={`py-2 px-1.5 rounded-xl font-bold text-[10px] border flex flex-col items-center gap-1 cursor-pointer transition ${
+                        check.snack
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/35'
+                          : 'bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-800/60 dark:border-slate-700 dark:text-slate-400'
+                      }`}
+                    >
+                      <span className="text-[11px]">🥛</span>
+                      <span>Xế</span>
+                      <span className="text-[8.5px] uppercase font-black tracking-wider mt-0.5">
+                        {check.snack ? 'Có Ăn ✔️' : 'Không'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -1353,7 +1756,7 @@ export default function AttendanceHistory({
           <div className="flex justify-between items-center">
             <div>
               <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">
-                ⏰ Khung thời gian hoạt động của lớp học ngày {vietnameseDate}
+                ⏰ Khung thời gian hoạt động của lớp học ngày {vietnameseActiveWorkDate}
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 Theo dõi tiến độ bài học, các lớp thể dục ngoài trời, giờ ăn dặm của trẻ hôm nay.
@@ -1486,7 +1889,7 @@ export default function AttendanceHistory({
                     className: className,
                     type: 'activity_update',
                     title: 'Cập nhật hoạt động lớp con',
-                    content: `Giáo viên vừa cập nhật hoạt động: "${activityForm.title}" (${activityForm.time}) vào ngày ${dateFilter}.`,
+                    content: `Giáo viên vừa cập nhật hoạt động: "${activityForm.title}" (${activityForm.time}) vào ngày ${activeWorkDate}.`,
                     createdAt: new Date().toISOString(),
                     isRead: false
                   };
@@ -1495,7 +1898,7 @@ export default function AttendanceHistory({
                   const newAct: ClassActivity = {
                     id: `act_${Date.now()}`,
                     classId: currentClassId,
-                    date: dateFilter,
+                    date: activeWorkDate,
                     title: activityForm.title,
                     time: activityForm.time,
                     completed: false
@@ -1510,7 +1913,7 @@ export default function AttendanceHistory({
                     className: className,
                     type: 'activity_create',
                     title: 'Hoạt động mới của lớp con',
-                    content: `Giáo viên vừa thêm hoạt động mới: "${activityForm.title}" vào khung giờ ${activityForm.time} ngày ${dateFilter}.`,
+                    content: `Giáo viên vừa thêm hoạt động mới: "${activityForm.title}" vào khung giờ ${activityForm.time} ngày ${activeWorkDate}.`,
                     createdAt: new Date().toISOString(),
                     isRead: false
                   };
@@ -1578,8 +1981,8 @@ export default function AttendanceHistory({
               </h3>
               <p className="text-xs text-slate-400 mt-1">
                 Theo dõi và đánh giá sức khỏe, dinh dưỡng, sinh hoạt hằng ngày của trẻ lớp {classrooms.find(c => c.id === classFilter)?.name || ''} vào ngày {(() => {
-                  const parts = dateFilter.split('-');
-                  return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateFilter;
+                  const parts = activeWorkDate.split('-');
+                  return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : activeWorkDate;
                 })()}.
               </p>
             </div>
@@ -1614,14 +2017,14 @@ export default function AttendanceHistory({
               {filteredStudents.map(student => {
                 // Find existing assessment for this student on the selected date Filter
                 const studentAssessment = dailyAssessments.find(
-                  a => a.studentId === student.id && a.date === dateFilter
+                  a => a.studentId === student.id && a.date === activeWorkDate
                 );
 
                 return (
                   <StudentAssessmentCard
                     key={student.id}
                     student={student}
-                    date={dateFilter}
+                    date={activeWorkDate}
                     initialAssessment={studentAssessment}
                     onSave={handleSaveAssessment}
                     successMsg={assessmentSuccessMsg[student.id]}
@@ -1755,6 +2158,20 @@ export default function AttendanceHistory({
                   onChange={(e) => setNewNotes(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700/80 rounded-xl bg-slate-50 dark:bg-slate-800 text-sm font-normal text-slate-800 dark:text-slate-100 outline-none"
                 />
+                
+                {/* Quick Notes Selection in Modal */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {QUICK_NOTE_TEMPLATES.map((noteOpt) => (
+                    <button
+                      key={noteOpt}
+                      type="button"
+                      onClick={() => handleSelectQuickNoteForModal(noteOpt)}
+                      className="px-2 py-1 text-[10px] font-bold bg-slate-50 hover:bg-emerald-50 dark:bg-slate-800/60 dark:hover:bg-slate-850 text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 border border-slate-200 dark:border-slate-700/50 rounded-lg cursor-pointer transition select-none"
+                    >
+                      +{noteOpt}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="flex gap-3 mt-6 pt-2">

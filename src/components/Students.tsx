@@ -34,7 +34,9 @@ import {
   QrCode,
   Printer,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  LayoutGrid,
+  List
 } from 'lucide-react';
 import { Student, Classroom, Gender, SchoolSettings } from '../types';
 import { generateMockEmbedding } from '../utils/faceSim';
@@ -83,6 +85,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
   const [classFilter, setClassFilter] = useState('all');
   const [monthFilter, setMonthFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const itemsPerPage = 8;
 
   const uniqueMonths = useMemo(() => {
@@ -168,6 +171,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
   // Camera capture states inside registration
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [hasCameraError, setHasCameraError] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -216,7 +220,9 @@ export default function Students({ students, classrooms, saveStudents, settings 
       const matchSearch =
         s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.studentCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.email.toLowerCase().includes(searchTerm.toLowerCase());
+        s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (s.parentPhone && s.parentPhone.includes(searchTerm)) ||
+        (s.className && s.className.toLowerCase().includes(searchTerm.toLowerCase()));
       
       const matchClass = classFilter === 'all' || s.classId === classFilter;
       
@@ -464,6 +470,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
     setIsCameraActive(true);
     setCapturedImage(null);
     setFormError('');
+    setHasCameraError(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 320, height: 240, facingMode: 'user' },
@@ -477,6 +484,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
     } catch (e) {
       console.error('Cannot access camera:', e);
       setFormError('Không thể mở Camera của thiết bị. Vui lòng kiểm tra quyền truy cập.');
+      setHasCameraError(true);
       setIsCameraActive(false);
     }
   };
@@ -487,6 +495,7 @@ export default function Students({ students, classrooms, saveStudents, settings 
       streamRef.current = null;
     }
     setIsCameraActive(false);
+    setHasCameraError(false);
   };
 
   const captureSnapshot = () => {
@@ -647,7 +656,185 @@ export default function Students({ students, classrooms, saveStudents, settings 
   };
 
   // --- EXCEL/CSV IMPORT & EXPORT ---
-  
+
+  // Export talent statistics to Excel
+  const handleExportTalentsExcel = () => {
+    try {
+      // 1. Sheet 1: Tổng hợp theo môn học năng khiếu
+      const summaryRows: any[][] = [
+        ['BÁO CÁO TỔNG HỢP CÁC LỚP NĂNG KHIẾU / NGOẠI KHÓA'],
+        [`Ngày xuất: ${new Date().toLocaleDateString('vi-VN')} - Tháng áp dụng: ${monthFilter === 'all' ? '2026-07' : monthFilter}`],
+        [],
+        [
+          'STT',
+          'Tên Môn Năng Khiếu',
+          'Lớp Học',
+          'Lịch Học',
+          'Khung Giờ',
+          'Học Phí Môn (đ)',
+          'Số Lượng Học Sinh Đăng Ký',
+          'Tổng Học Phí Dự Kiến (đ)'
+        ]
+      ];
+
+      // 2. Sheet 2: Danh sách chi tiết học sinh đăng ký môn năng khiếu
+      const detailRows: any[][] = [
+        ['DANH SÁCH CHI TIẾT HỌC SINH ĐĂNG KÝ MÔN NĂNG KHIẾU'],
+        [`Ngày xuất: ${new Date().toLocaleDateString('vi-VN')} - Tháng áp dụng: ${monthFilter === 'all' ? '2026-07' : monthFilter}`],
+        [],
+        [
+          'STT',
+          'Mã Học Sinh',
+          'Họ và Tên',
+          'Lớp Học',
+          'Giới Tính',
+          'Ngày Sinh',
+          'Môn Năng Khiếu Đăng Ký',
+          'Học Phí (đ)',
+          'Trạng Thái Đóng Phí',
+          'Số Điện Thoại Phụ Huynh',
+          'Ghi Chú'
+        ]
+      ];
+
+      const targetMonth = monthFilter === 'all' ? '2026-07' : monthFilter;
+
+      let summaryIndex = 1;
+      let totalTalentStudentsAll = 0;
+      let totalExpectedRevenueAll = 0;
+
+      classrooms.forEach(cls => {
+        if (classFilter !== 'all' && cls.id !== classFilter) {
+          return;
+        }
+
+        const subjects = cls.talentSubjects || [];
+        if (subjects.length === 0) return;
+
+        const classStudents = filteredStudents.filter(s => s.classId === cls.id);
+
+        subjects.forEach(subj => {
+          const registeredStudents = classStudents.filter(s => {
+            return s.registeredTalentSubjects?.includes(subj.id);
+          });
+
+          const count = registeredStudents.length;
+          const totalFee = count * subj.fee;
+
+          summaryRows.push([
+            summaryIndex++,
+            subj.name,
+            cls.name,
+            subj.schedule || 'Chưa cấu hình',
+            subj.timeSlot || 'Chưa cấu hình',
+            subj.fee,
+            count,
+            totalFee
+          ]);
+
+          totalTalentStudentsAll += count;
+          totalExpectedRevenueAll += totalFee;
+        });
+      });
+
+      if (summaryRows.length > 4) {
+        summaryRows.push([]);
+        summaryRows.push([
+          '',
+          'TỔNG CỘNG',
+          '',
+          '',
+          '',
+          '',
+          totalTalentStudentsAll,
+          totalExpectedRevenueAll
+        ]);
+      } else {
+        summaryRows.push(['Không có môn năng khiếu nào được đăng ký trong danh mục đang chọn.']);
+      }
+
+      let detailIndex = 1;
+      filteredStudents.forEach(s => {
+        const clsObj = classrooms.find(c => c.id === s.classId);
+        const classNameStr = clsObj?.name || 'Chưa xếp lớp';
+        const registeredIds = s.registeredTalentSubjects || [];
+        const subjects = clsObj?.talentSubjects || [];
+
+        const studentTalents = subjects.filter(subj => registeredIds.includes(subj.id));
+
+        if (studentTalents.length === 0) {
+          return;
+        }
+
+        const talentNames = studentTalents.map(t => t.name).join(', ');
+        const isPaid = StorageService.isStudentPaidForMonth(s, targetMonth);
+        const statusStr = isPaid ? 'Đã đóng' : 'Chưa đóng';
+
+        detailRows.push([
+          detailIndex++,
+          s.studentCode,
+          s.fullName,
+          classNameStr,
+          s.gender,
+          s.dateOfBirth,
+          talentNames,
+          s.talentFee || 0,
+          statusStr,
+          s.parentPhone,
+          s.quickNotes || ''
+        ]);
+      });
+
+      if (detailRows.length <= 4) {
+        detailRows.push(['Không có học sinh nào đăng ký môn năng khiếu trong danh mục đang chọn.']);
+      }
+
+      const wb = XLSX.utils.book_new();
+
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+      wsSummary['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } }
+      ];
+      wsSummary['!cols'] = [
+        { wch: 8 },  // STT
+        { wch: 25 }, // Tên Môn
+        { wch: 15 }, // Lớp
+        { wch: 20 }, // Lịch học
+        { wch: 20 }, // Giờ học
+        { wch: 20 }, // Học phí
+        { wch: 25 }, // Số lượng HS
+        { wch: 25 }  // Tổng doanh thu
+      ];
+      XLSX.utils.book_append_sheet(wb, wsSummary, "Tổng Hợp Môn Học");
+
+      const wsDetail = XLSX.utils.aoa_to_sheet(detailRows);
+      wsDetail['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 10 } }
+      ];
+      wsDetail['!cols'] = [
+        { wch: 8 },  // STT
+        { wch: 15 }, // Mã HS
+        { wch: 25 }, // Họ Tên
+        { wch: 15 }, // Lớp
+        { wch: 12 }, // Giới tính
+        { wch: 15 }, // Ngày sinh
+        { wch: 35 }, // Môn đăng ký
+        { wch: 18 }, // Học phí
+        { wch: 20 }, // Trạng thái đóng phí
+        { wch: 22 }, // SĐT Phụ Huynh
+        { wch: 25 }  // Ghi chú
+      ];
+      XLSX.utils.book_append_sheet(wb, wsDetail, "Danh Sách Học Sinh");
+
+      XLSX.writeFile(wb, `thong_ke_nang_khieu_${targetMonth}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch (e) {
+      console.error(e);
+      alert('Xuất file Excel thống kê năng khiếu thất bại.');
+    }
+  };
+
   // Export fee payments to Excel (Tuition & Other fees)
   const handleExportFeePaymentsExcel = () => {
     try {
@@ -1514,8 +1701,8 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
   return (
     <div className="space-y-6">
       {/* Title Header */}
-      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs">
-        <div>
+      <div className="flex flex-col 2xl:flex-row 2xl:items-center 2xl:justify-between gap-5 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs">
+        <div className="flex-1 min-w-[280px] md:min-w-[400px]">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
             Quản Lý Học Sinh <Users className={getThemeTextClass()} size={24} />
           </h1>
@@ -1525,7 +1712,7 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
         </div>
         
         {/* Buttons */}
-        <div className="flex flex-wrap gap-2.5 shrink-0">
+        <div className="flex flex-wrap gap-2.5 w-full 2xl:w-auto justify-start 2xl:justify-end shrink-0">
           <button
             onClick={() => { setIsImportOpen(true); setExcelPreview([]); setImportError(''); }}
             className="px-3.5 py-2.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2 transition cursor-pointer"
@@ -1548,6 +1735,14 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
           >
             <Download size={14} />
             <span>Xuất Excel Đóng Phí</span>
+          </button>
+
+          <button
+            onClick={handleExportTalentsExcel}
+            className="px-3.5 py-2.5 border border-violet-200 dark:border-violet-900 bg-violet-500/5 hover:bg-violet-500/10 rounded-xl text-xs font-semibold text-violet-700 dark:text-violet-400 flex items-center gap-2 transition cursor-pointer"
+          >
+            <Download size={14} />
+            <span>Xuất Excel Năng Khiếu</span>
           </button>
 
           <button
@@ -1595,14 +1790,26 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
           <input
             id="student-search"
             type="text"
-            placeholder="Tìm kiếm theo mã học sinh, tên hoặc email..."
+            placeholder="Tìm kiếm theo tên, mã học sinh, lớp học hoặc số điện thoại phụ huynh..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl focus:outline-none focus:ring-1 text-sm text-slate-800 dark:text-slate-200 transition"
+            className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl focus:outline-none focus:ring-1 text-sm text-slate-800 dark:text-slate-200 transition"
           />
+          {searchTerm && (
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setCurrentPage(1);
+              }}
+              className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+              title="Xóa tìm kiếm"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
         
         {/* Class & Month Filters */}
@@ -1650,172 +1857,380 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
           <div className="text-xs font-semibold text-slate-400 bg-slate-100 dark:bg-slate-800/60 px-2.5 py-2 rounded-xl shrink-0">
             Tổng cộng: <strong className="text-slate-700 dark:text-slate-200">{filteredStudents.length}</strong>
           </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl shrink-0">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                viewMode === 'grid'
+                  ? 'bg-white dark:bg-slate-700 ' + getThemeTextClass() + ' shadow-xs'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+              }`}
+              title="Chế độ xem lưới"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                viewMode === 'list'
+                  ? 'bg-white dark:bg-slate-700 ' + getThemeTextClass() + ' shadow-xs'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+              }`}
+              title="Chế độ xem danh sách"
+            >
+              <List size={15} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Students Grid & Empty States */}
+      {/* Students Grid/List & Empty States */}
       {paginatedStudents.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {paginatedStudents.map((s) => (
-            <div
-              key={s.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700 shadow-xs hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col justify-between group"
-            >
-              {/* Header Profile Info */}
-              <div className="p-5 flex flex-col items-center text-center">
-                
-                {/* Avatar with Glow indicator */}
-                <div className="relative mb-3">
-                  <div className="w-16 h-16 rounded-full overflow-hidden bg-slate-100 border-2 border-slate-100 dark:border-slate-800 shadow-inner">
-                    <img
-                      src={s.avatar || StorageService.getNewAvatar(s.fullName, 0)}
-                      alt={s.fullName}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
+        viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            {paginatedStudents.map((s) => (
+              <div
+                key={s.id}
+                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700 shadow-xs hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col justify-between group"
+              >
+                {/* Header Profile Info */}
+                <div className="p-5 flex flex-col items-center text-center">
                   
-                  {/* Bio status (face registered or not) */}
-                  {s.faceEmbedding ? (
-                    <span className="absolute bottom-0 right-0 p-1 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 text-[8px]" title="Đã đăng ký khuôn mặt">
-                      <Camera size={10} className="text-white" />
-                    </span>
-                  ) : (
-                    <span className="absolute bottom-0 right-0 p-1 bg-rose-400 rounded-full border-2 border-white dark:border-slate-900 text-[8px]" title="Chưa đăng ký">
-                      <ShieldAlert size={10} className="text-white" />
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <h3 className="text-sm font-bold text-slate-800 dark:text-white line-clamp-1 group-hover:text-blue-500 transition-colors">
-                    {s.fullName}
-                  </h3>
-                  <div className="flex items-center justify-center gap-1.5 text-[10px] font-semibold">
-                    <span className="text-slate-400 font-mono">Mã: {s.studentCode}</span>
-                    <span className="text-slate-300">•</span>
-                    <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold">
-                      {s.className || 'Chưa xếp lớp'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Micro Details */}
-                <div className="mt-4 w-full space-y-1.5 text-left text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-50 dark:border-slate-800/80 pt-3">
-                  <div className="flex items-center gap-2">
-                    <Phone size={12} className="text-slate-400 shrink-0" />
-                    <span className="truncate">SĐT: {s.parentPhone || 'Chưa cập nhật'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Mail size={12} className="text-slate-400 shrink-0" />
-                    <span className="truncate">{s.email || 'Chưa cập nhật'}</span>
-                  </div>
-
-                  {/* Học phí Năng khiếu & Trạng thái thanh toán */}
-                  <div className="border-t border-dashed border-slate-100 dark:border-slate-800/80 pt-2.5 mt-2.5 flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">
-                        {s.otherFee ? 'Tổng HP (+Phí khác)' : 'HP Năng khiếu'}
-                      </span>
-                      <span className="font-mono text-[11px] font-bold text-amber-600 dark:text-amber-400">
-                        {((s.talentFee || 0) + (s.otherFee || 0)).toLocaleString('vi-VN')} đ
-                      </span>
-                      {s.otherFee && (
-                        <span className="text-[8px] text-slate-400 dark:text-slate-500 italic line-clamp-1">
-                          (Năng khiếu: {s.talentFee?.toLocaleString('vi-VN')} đ | Khác: {s.otherFee?.toLocaleString('vi-VN')} đ)
-                        </span>
-                      )}
+                  {/* Avatar with Glow indicator - Larger size for face recognition */}
+                  <div className="relative mb-3">
+                    <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 border-4 border-slate-100 dark:border-slate-800 shadow-inner">
+                      <img
+                        src={s.avatar || StorageService.getNewAvatar(s.fullName, 0)}
+                        alt={s.fullName}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
                     </div>
                     
-                    <label 
-                      onClick={(e) => e.stopPropagation()} 
-                      className="flex items-center gap-1.5 cursor-pointer text-[10px] select-none bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700/60 px-2 py-1 rounded-lg border border-slate-100 dark:border-slate-800 transition-all duration-200"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter)}
-                        onChange={() => handleToggleTalentFeePaid(s.id)}
-                        className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer"
-                      />
-                      <span className={`font-bold transition-colors ${StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                        {StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) ? 'Đã đóng' : 'Chưa đóng'}
+                    {/* Bio status (face registered or not) */}
+                    {s.faceEmbedding ? (
+                      <span className="absolute bottom-1 right-1 p-1.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 text-[10px]" title="Đã đăng ký khuôn mặt">
+                        <Camera size={12} className="text-white" />
                       </span>
-                    </label>
+                    ) : (
+                      <span className="absolute bottom-1 right-1 p-1.5 bg-rose-400 rounded-full border-2 border-white dark:border-slate-900 text-[10px]" title="Chưa đăng ký">
+                        <ShieldAlert size={12} className="text-white" />
+                      </span>
+                    )}
                   </div>
 
-                  {/* Ghi chú nhanh trực tiếp */}
-                  <div className="border-t border-dashed border-slate-100 dark:border-slate-800/80 pt-2.5 mt-2.5 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Ghi chú nhanh trong ngày</span>
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-white line-clamp-1 group-hover:text-blue-500 transition-colors">
+                      {s.fullName}
+                    </h3>
+                    <div className="flex items-center justify-center gap-1.5 text-[10px] font-semibold">
+                      <span className="text-slate-400 font-mono">Mã: {s.studentCode}</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold">
+                        {s.className || 'Chưa xếp lớp'}
+                      </span>
                     </div>
-                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="text"
-                        placeholder="Ví dụ: Bé ăn ngoan, ngủ tốt..."
-                        defaultValue={s.quickNotes || ''}
-                        onBlur={(e) => handleSaveQuickNote(s.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleSaveQuickNote(s.id, e.currentTarget.value);
-                            e.currentTarget.blur();
-                          }
-                        }}
-                        className="w-full px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-700/60 rounded-lg bg-slate-50 dark:bg-slate-800/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:ring-1 focus:ring-blue-400 transition"
-                      />
+                  </div>
+
+                  {/* Micro Details */}
+                  <div className="mt-4 w-full space-y-1.5 text-left text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-50 dark:border-slate-800/80 pt-3">
+                    <div className="flex items-center gap-2">
+                      <Phone size={12} className="text-slate-400 shrink-0" />
+                      <span className="truncate">SĐT: {s.parentPhone || 'Chưa cập nhật'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Mail size={12} className="text-slate-400 shrink-0" />
+                      <span className="truncate">{s.email || 'Chưa cập nhật'}</span>
+                    </div>
+
+                    {/* Học phí Năng khiếu & Trạng thái thanh toán */}
+                    <div className="border-t border-dashed border-slate-100 dark:border-slate-800/80 pt-2.5 mt-2.5 flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">
+                          {s.otherFee ? 'Tổng HP (+Phí khác)' : 'HP Năng khiếu'}
+                        </span>
+                        <span className="font-mono text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                          {((s.talentFee || 0) + (s.otherFee || 0)).toLocaleString('vi-VN')} đ
+                        </span>
+                        {s.otherFee && (
+                          <span className="text-[8px] text-slate-400 dark:text-slate-500 italic line-clamp-1">
+                            (Năng khiếu: {s.talentFee?.toLocaleString('vi-VN')} đ | Khác: {s.otherFee?.toLocaleString('vi-VN')} đ)
+                          </span>
+                        )}
+                      </div>
+                      
+                      <label 
+                        onClick={(e) => e.stopPropagation()} 
+                        className="flex items-center gap-1.5 cursor-pointer text-[10px] select-none bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700/60 px-2 py-1 rounded-lg border border-slate-100 dark:border-slate-800 transition-all duration-200"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter)}
+                          onChange={() => handleToggleTalentFeePaid(s.id)}
+                          className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer"
+                        />
+                        <span className={`font-bold transition-colors ${StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                          {StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) ? 'Đã đóng' : 'Chưa đóng'}
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Ghi chú nhanh trực tiếp */}
+                    <div className="border-t border-dashed border-slate-100 dark:border-slate-800/80 pt-2.5 mt-2.5 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Ghi chú nhanh trong ngày</span>
+                      </div>
+                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          placeholder="Ví dụ: Bé ăn ngoan, ngủ tốt..."
+                          defaultValue={s.quickNotes || ''}
+                          onBlur={(e) => handleSaveQuickNote(s.id, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleSaveQuickNote(s.id, e.currentTarget.value);
+                              e.currentTarget.blur();
+                            }
+                          }}
+                          className="w-full px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-700/60 rounded-lg bg-slate-50 dark:bg-slate-800/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:ring-1 focus:ring-blue-400 transition"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Action Footer */}
-              <div className="px-5 py-3 bg-slate-50/50 dark:bg-slate-800/20 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => handleOpenDetail(s)}
-                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer transition"
-                  >
-                    <Eye size={13} />
-                    <span>Chi tiết</span>
-                  </button>
-                  <button
-                    onClick={() => setSelectedQRStudent(s)}
-                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/20 flex items-center gap-1 cursor-pointer transition"
-                    title="Xem mã QR học sinh"
-                  >
-                    <QrCode size={13} />
-                    <span>Mã QR</span>
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  {!StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) && (s.talentFee || 0) > 0 && (
+                {/* Action Footer */}
+                <div className="px-5 py-3 bg-slate-50/50 dark:bg-slate-800/20 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <div className="flex gap-1.5">
                     <button
-                      onClick={() => handleOpenReminder(s)}
-                      className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/20 cursor-pointer transition animate-pulse"
-                      title="Nhắc nhở đóng học phí qua SĐT"
+                      onClick={() => handleOpenDetail(s)}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer transition"
                     >
-                      <Bell size={14} />
+                      <Eye size={13} />
+                      <span>Chi tiết</span>
                     </button>
-                  )}
-                  <button
-                    onClick={() => handleOpenEdit(s)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition"
-                    title="Chỉnh sửa hồ sơ"
-                  >
-                    <Edit size={14} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(s.id, s.fullName)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer transition"
-                    title="Xóa học sinh"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                    <button
+                      onClick={() => setSelectedQRStudent(s)}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/20 flex items-center gap-1 cursor-pointer transition"
+                      title="Xem mã QR học sinh"
+                    >
+                      <QrCode size={13} />
+                      <span>Mã QR</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {!StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter) && (s.talentFee || 0) > 0 && (
+                      <button
+                        onClick={() => handleOpenReminder(s)}
+                        className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/20 cursor-pointer transition animate-pulse"
+                        title="Nhắc nhở đóng học phí qua SĐT"
+                      >
+                        <Bell size={14} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleOpenEdit(s)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition"
+                      title="Chỉnh sửa hồ sơ"
+                    >
+                      <Edit size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(s.id, s.fullName)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer transition"
+                      title="Xóa học sinh"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                    <th className="py-3.5 px-4">Học sinh</th>
+                    <th className="py-3.5 px-4">Thông tin cơ bản</th>
+                    <th className="py-3.5 px-4">Lớp & Liên hệ</th>
+                    <th className="py-3.5 px-4">Gương mặt</th>
+                    <th className="py-3.5 px-4">Học phí ({monthFilter === 'all' ? '2026-07' : monthFilter})</th>
+                    <th className="py-3.5 px-4 w-[220px]">Ghi chú nhanh</th>
+                    <th className="py-3.5 px-4 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                  {paginatedStudents.map((s) => {
+                    const isPaid = StorageService.isStudentPaidForMonth(s, monthFilter === 'all' ? '2026-07' : monthFilter);
+                    return (
+                      <tr key={s.id} className="hover:bg-slate-50/40 dark:hover:bg-slate-800/20 transition-all group">
+                        {/* Avatar & Name & Code */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="relative shrink-0">
+                              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 border border-slate-200 dark:border-slate-700">
+                                <img
+                                  src={s.avatar || StorageService.getNewAvatar(s.fullName, 0)}
+                                  alt={s.fullName}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              {s.faceEmbedding ? (
+                                <span className="absolute -bottom-1 -right-1 p-0.5 bg-emerald-500 rounded-full border border-white dark:border-slate-900 text-[6px]">
+                                  <Camera size={8} className="text-white" />
+                                </span>
+                              ) : (
+                                <span className="absolute -bottom-1 -right-1 p-0.5 bg-rose-400 rounded-full border border-white dark:border-slate-900 text-[6px]">
+                                  <ShieldAlert size={8} className="text-white" />
+                                </span>
+                              )}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-slate-800 dark:text-white line-clamp-1 group-hover:text-blue-500 transition-colors">
+                                {s.fullName}
+                              </h4>
+                              <span className="text-[10px] font-mono text-slate-400">Mã: {s.studentCode}</span>
+                            </div>
+                          </div>
+                        </td>
+                        
+                        {/* Basic details */}
+                        <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
+                          <div className="space-y-0.5">
+                            <div>
+                              Giới tính: <span className="font-semibold text-slate-800 dark:text-slate-200">{s.gender}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <Calendar size={10} /> {s.dateOfBirth ? new Date(s.dateOfBirth).toLocaleDateString('vi-VN') : 'Chưa cập nhật'}
+                            </div>
+                          </div>
+                        </td>
+                        
+                        {/* Class & Contact */}
+                        <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
+                          <div className="space-y-0.5">
+                            <div>
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold">
+                                {s.className || 'Chưa xếp lớp'}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                              <Phone size={10} className="text-slate-400 shrink-0" />
+                              <span>{s.parentPhone || 'Chưa cập nhật'}</span>
+                            </div>
+                          </div>
+                        </td>
+                        
+                        {/* Face Recognition Status */}
+                        <td className="py-3.5 px-4">
+                          {s.faceEmbedding ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+                              <Check size={10} /> Đã nhận diện
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400">
+                              <ShieldAlert size={10} className="text-rose-500" /> Chưa đăng ký
+                            </span>
+                          )}
+                        </td>
+                        
+                        {/* Tuition fees & Paid Status */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                              {((s.talentFee || 0) + (s.otherFee || 0)).toLocaleString('vi-VN')} đ
+                            </span>
+                            <label 
+                              onClick={(e) => e.stopPropagation()} 
+                              className="inline-flex items-center gap-1 cursor-pointer text-[10px] select-none bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700/60 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-800 transition-all duration-200 w-fit"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isPaid}
+                                onChange={() => handleToggleTalentFeePaid(s.id)}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-3 h-3 cursor-pointer"
+                              />
+                              <span className={`font-bold transition-colors ${isPaid ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                                {isPaid ? 'Đã đóng' : 'Chưa đóng'}
+                              </span>
+                            </label>
+                          </div>
+                        </td>
+                        
+                        {/* Quick notes */}
+                        <td className="py-3.5 px-4" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            placeholder="Bé ăn ngoan, ngủ tốt..."
+                            defaultValue={s.quickNotes || ''}
+                            onBlur={(e) => handleSaveQuickNote(s.id, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleSaveQuickNote(s.id, e.currentTarget.value);
+                                e.currentTarget.blur();
+                              }
+                            }}
+                            className="w-full px-2 py-1 text-[11px] border border-slate-200 dark:border-slate-700/60 rounded-lg bg-slate-50 dark:bg-slate-800/40 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 outline-none focus:ring-1 focus:ring-blue-400 transition"
+                          />
+                        </td>
+                        
+                        {/* Action buttons */}
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleOpenDetail(s)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition"
+                              title="Chi tiết"
+                            >
+                              <Eye size={14} />
+                            </button>
+                            <button
+                              onClick={() => setSelectedQRStudent(s)}
+                              className="p-1.5 rounded-lg text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/20 cursor-pointer transition"
+                              title="Xem mã QR học sinh"
+                            >
+                              <QrCode size={14} />
+                            </button>
+                            {!isPaid && (s.talentFee || 0) > 0 && (
+                              <button
+                                onClick={() => handleOpenReminder(s)}
+                                className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/20 cursor-pointer transition animate-pulse"
+                                title="Nhắc nhở đóng học phí qua SĐT"
+                              >
+                                <Bell size={14} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleOpenEdit(s)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 cursor-pointer transition"
+                              title="Chỉnh sửa hồ sơ"
+                            >
+                              <Edit size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(s.id, s.fullName)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer transition"
+                              title="Xóa học sinh"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
-        </div>
+          </div>
+        )
       ) : (
         <div className="p-16 rounded-2xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-center flex flex-col items-center justify-center space-y-3">
           <Users size={48} className="text-slate-300 stroke-1" />
@@ -2638,12 +3053,30 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
 
                     {/* Offline Empty view */}
                     {!isCameraActive && !capturedImage && (
-                      <div className="text-center text-slate-500 space-y-1 p-4 flex flex-col items-center justify-center">
-                        <Camera size={28} className="stroke-1 text-slate-400 animate-pulse" />
-                        <p className="text-[10px] leading-normal font-medium max-w-[180px]">
-                          Camera chưa hoạt động. Hãy bấm nút khởi chạy camera để đăng ký gương mặt học sinh.
-                        </p>
-                      </div>
+                      hasCameraError ? (
+                        <div className="p-3 bg-slate-900 text-slate-300 space-y-2 flex flex-col justify-center h-full w-full">
+                          <div className="flex items-center gap-1 text-rose-400 font-bold border-b border-slate-800 pb-1.5 w-full justify-center">
+                            <AlertCircle size={13} className="shrink-0 text-rose-500 animate-pulse" />
+                            <span className="text-[9px] uppercase tracking-wider">Lỗi truy cập máy ảnh</span>
+                          </div>
+                          <p className="text-[8.5px] text-slate-400 text-center leading-relaxed">
+                            Máy ảnh bị trình duyệt chặn hoặc không khả dụng.
+                          </p>
+                          <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1 text-[8px] text-slate-300 leading-normal">
+                            <p className="font-extrabold text-amber-400">💡 Hướng dẫn cho phép:</p>
+                            <p>1. Nhấp biểu tượng <strong className="text-white">Ổ khóa 🔒</strong> ở thanh địa chỉ.</p>
+                            <p>2. Chuyển <strong className="text-white">Máy ảnh (Camera)</strong> thành <strong className="text-emerald-400">Cho phép (Allow)</strong>.</p>
+                            <p>3. Tải lại trang <strong className="text-white">(F5)</strong>.</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center text-slate-500 space-y-1 p-4 flex flex-col items-center justify-center">
+                          <Camera size={28} className="stroke-1 text-slate-400 animate-pulse" />
+                          <p className="text-[10px] leading-normal font-medium max-w-[180px]">
+                            Camera chưa hoạt động. Hãy bấm nút khởi chạy camera để đăng ký gương mặt học sinh.
+                          </p>
+                        </div>
+                      )
                     )}
                     
                     <canvas ref={canvasRef} className="hidden" />

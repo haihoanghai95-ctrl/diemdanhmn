@@ -208,6 +208,112 @@ export default function Reports({ students, classrooms, attendance, settings, is
     }
   };
 
+  // Export daily attendance matrix grid to Excel
+  const handleExportDailyMatrixExcel = () => {
+    try {
+      const parts = activeMonth.split('-');
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10);
+      const formattedMonth = `${parts[1]}/${parts[0]}`;
+      const fileNameMonth = `${parts[1]}_${parts[0]}`;
+
+      // Get days of the month
+      const daysInMonth = new Date(year, month, 0).getDate();
+
+      // Header rows
+      const exportData: any[][] = [
+        [`BẢNG ĐIỂM DANH CHI TIẾT HÀNG NGÀY - THÁNG ${formattedMonth}`],
+        [`Lớp học: ${selectedClassId === 'all' ? 'Tất cả khối lớp' : (classrooms.find(c => c.id === selectedClassId)?.name || '')}`],
+        [`Ký hiệu chuyên cần:  ✓ (Đúng giờ)  |  M (Đi muộn)  |  V (Vắng học)  |  - (Không học/Không có dữ liệu)`],
+        [],
+      ];
+
+      // Prepare headers
+      const headers = ['STT', 'Mã Học Sinh', 'Họ Và Tên', 'Lớp Học'];
+      for (let d = 1; d <= daysInMonth; d++) {
+        headers.push(String(d).padStart(2, '0'));
+      }
+      headers.push('Tổng Đúng Giờ', 'Tổng Muộn', 'Tổng Vắng', 'Tỷ Lệ (%)');
+      exportData.push(headers);
+
+      // Prepare student rows
+      searchedStudentSummary.forEach((s, idx) => {
+        const rowData: any[] = [
+          idx + 1,
+          s.studentCode,
+          s.fullName,
+          s.className,
+        ];
+
+        // For each day in month, check attendance status
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dayStr = String(d).padStart(2, '0');
+          const dateStr = `${activeMonth}-${dayStr}`;
+          
+          const record = attendance.find(rec => 
+            rec.studentId === s.studentId && 
+            rec.date === dateStr
+          );
+
+          if (record) {
+            if (record.status === 'present') {
+              rowData.push('✓');
+            } else if (record.status === 'late') {
+              rowData.push('M');
+            } else if (record.status === 'absent') {
+              rowData.push('V');
+            } else {
+              rowData.push('-');
+            }
+          } else {
+            rowData.push('-');
+          }
+        }
+
+        // Add summary columns
+        rowData.push(s.present, s.late, s.absent, `${s.rate}%`);
+        exportData.push(rowData);
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(exportData);
+
+      // Merge headers across the sheet columns
+      const totalCols = headers.length;
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: totalCols - 1 } }
+      ];
+
+      // Column widths
+      const colWidths = [
+        { wch: 6 },  // STT
+        { wch: 14 }, // Mã học sinh
+        { wch: 22 }, // Họ và tên
+        { wch: 14 }, // Lớp học
+      ];
+      // For each day of the month, short width
+      for (let d = 1; d <= daysInMonth; d++) {
+        colWidths.push({ wch: 4.5 });
+      }
+      // For totals
+      colWidths.push(
+        { wch: 14 }, // Tổng Đi Học
+        { wch: 14 }, // Tổng Đi Muộn
+        { wch: 12 }, // Tổng Vắng
+        { wch: 12 }  // Tỷ Lệ
+      );
+      ws['!cols'] = colWidths;
+
+      XLSX.utils.book_append_sheet(wb, ws, `Chi_Tiet_${fileNameMonth}`);
+      XLSX.writeFile(wb, `Bao_Cao_Diem_Danh_Chi_Tiet_${fileNameMonth}.xlsx`);
+    } catch (e) {
+      console.error(e);
+      alert('Xuất bảng điểm danh chi tiết thất bại.');
+    }
+  };
+
   // Map theme colors
   const getThemeTextClass = () => {
     switch (settings.themeColor) {
@@ -654,7 +760,7 @@ export default function Reports({ students, classrooms, attendance, settings, is
       {/* 5. Monthly Student Attendance & Absence Summary Table */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs flex flex-col gap-6" id="monthly-summary-section">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-[280px] md:min-w-[400px]">
             <h3 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
               Tổng Hợp Đi Học & Vắng Mặt Cuối Tháng Của Từng Bé <FileSpreadsheet className="text-emerald-500 shrink-0" size={22} />
             </h3>
@@ -686,11 +792,22 @@ export default function Reports({ students, classrooms, attendance, settings, is
             <button
               onClick={handleExportMonthlyReport}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all active:scale-98 cursor-pointer shrink-0"
-              title="Xuất file báo cáo Excel chi tiết chuyên cần tháng"
+              title="Xuất file báo cáo Excel tổng hợp chuyên cần tháng"
               id="monthly-summary-export-btn"
             >
               <Download size={14} />
-              <span>Xuất Excel</span>
+              <span>Xuất Excel Tổng Hợp</span>
+            </button>
+
+            {/* Export Daily Excel Button */}
+            <button
+              onClick={handleExportDailyMatrixExcel}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all active:scale-98 cursor-pointer shrink-0"
+              title="Xuất bảng điểm danh chi tiết từng ngày trong tháng"
+              id="monthly-detail-export-btn"
+            >
+              <FileSpreadsheet size={14} />
+              <span>Xuất Excel Chi Tiết</span>
             </button>
           </div>
         </div>

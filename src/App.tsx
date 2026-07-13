@@ -374,17 +374,26 @@ export default function App() {
   };
 
   // --- COMPUTE TENANT-SPECIFIC DATA LISTS ---
-  const teacherClassIds = session?.isTeacher
-    ? classrooms.filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!)).map(c => c.id)
-    : [];
+  const teacherClassIds = useMemo(() => {
+    if (!session?.isTeacher) return [];
+    return classrooms
+      .filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!))
+      .map(c => c.id);
+  }, [classrooms, session]);
 
-  const displayedClassrooms = session?.isTeacher
-    ? classrooms.filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!))
-    : classrooms;
+  const displayedClassrooms = useMemo(() => {
+    if (session?.isTeacher) {
+      return classrooms.filter(c => c.createdBy === session.teacherPhone || c.coTeachers?.includes(session.teacherPhone!));
+    }
+    return classrooms;
+  }, [classrooms, session]);
 
-  const displayedStudents = session?.isTeacher
-    ? students.filter(s => teacherClassIds.includes(s.classId))
-    : students;
+  const displayedStudents = useMemo(() => {
+    if (session?.isTeacher) {
+      return students.filter(s => teacherClassIds.includes(s.classId));
+    }
+    return students;
+  }, [students, session, teacherClassIds]);
 
   // Calculate students with overdue talent fee by more than 3 days
   const overdueCount = useMemo(() => {
@@ -405,13 +414,19 @@ export default function App() {
     }).length;
   }, [displayedStudents]);
 
-  const displayedAttendance = session?.isTeacher
-    ? attendance.filter(a => teacherClassIds.includes(a.classId))
-    : attendance;
+  const displayedAttendance = useMemo(() => {
+    if (session?.isTeacher) {
+      return attendance.filter(a => teacherClassIds.includes(a.classId));
+    }
+    return attendance;
+  }, [attendance, session, teacherClassIds]);
 
-  const displayedAbsenceReports = session?.isTeacher
-    ? absenceReports.filter(r => teacherClassIds.includes(r.classId))
-    : absenceReports;
+  const displayedAbsenceReports = useMemo(() => {
+    if (session?.isTeacher) {
+      return absenceReports.filter(r => teacherClassIds.includes(r.classId));
+    }
+    return absenceReports;
+  }, [absenceReports, session, teacherClassIds]);
 
   const displayedNotifications = useMemo(() => {
     if (session?.isTeacher) {
@@ -1077,7 +1092,7 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'teachers' && (
+              {!session?.isTeacher && currentTab === 'teachers' && (
                 <Teachers
                   teachers={teachers}
                   saveTeachers={handleSaveTeachers}
@@ -1157,7 +1172,7 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'settings' && (
+              {!session?.isTeacher && currentTab === 'settings' && (
                 <SettingsComponent
                   settings={settings}
                   onSaveSettings={handleSaveSettings}
