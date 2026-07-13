@@ -22,7 +22,9 @@ import {
   Bell,
   QrCode,
   Printer,
-  X
+  X,
+  Sun,
+  Contrast
 } from 'lucide-react';
 import { Student, AttendanceRecord, AttendanceStatus, SchoolSettings } from '../types';
 import { audioService } from '../utils/audio';
@@ -46,8 +48,13 @@ export default function CameraAttendance({
   const [autoPilot, setAutoPilot] = useState(true);
   const [mode, setMode] = useState<'face' | 'qr'>('face');
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
   const [liveTime, setLiveTime] = useState(new Date().toLocaleTimeString('vi-VN'));
+
+  // Quick adjustment values for camera frame brightness and contrast
+  const [brightness, setBrightness] = useState<number>(100);
+  const [contrast, setContrast] = useState<number>(100);
 
   // Live time ticker for presentation mode clock
   useEffect(() => {
@@ -130,6 +137,7 @@ export default function CameraAttendance({
       console.warn('Cannot obtain camera feed:', e);
       setHasCameraError(true);
       setErrorMessage('Không tìm thấy Camera hoặc trình duyệt bị từ chối quyền truy cập. Hệ thống sẽ bật chế độ quét mô phỏng.');
+      setIsPermissionModalOpen(true);
     }
   };
 
@@ -668,6 +676,7 @@ export default function CameraAttendance({
                 <video
                   ref={videoRef}
                   className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
+                  style={{ filter: `brightness(${brightness}%) contrast(${contrast}%)` }}
                   playsInline
                   muted
                 />
@@ -730,18 +739,142 @@ export default function CameraAttendance({
               )}
 
               {!isActive && (
-                <div className="text-center text-slate-500 space-y-3 p-6">
+                <div className="text-center text-slate-500 space-y-3.5 p-6 flex flex-col items-center justify-center">
                   <Camera size={44} className="mx-auto text-slate-600 animate-pulse stroke-1" />
                   <p className="text-xs font-bold text-slate-400">Camera Điểm Danh Đang Tắt</p>
                   <button 
                     onClick={startScanningSession}
-                    className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-500 cursor-pointer"
+                    className="px-5 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-500 cursor-pointer shadow-md transition-transform active:scale-95"
                   >
                     Bật Camera ngay
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPermissionModalOpen(true)}
+                    className="text-[10px] text-rose-400 hover:text-rose-350 font-extrabold flex items-center gap-1 cursor-pointer underline decoration-dotted transition-colors"
+                  >
+                    <HelpCircle size={12} />
+                    <span>Hướng dẫn cấp quyền Camera 🔒</span>
                   </button>
                 </div>
               )}
             </div>
+
+            {/* Quick Adjust controls for Brightness & Contrast */}
+            {isActive && !hasCameraError && (
+              <div className="w-full max-w-[580px] mt-4 p-3.5 bg-slate-900/90 border border-slate-800 rounded-2xl space-y-3 shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                  <span className="text-[11px] font-black uppercase text-rose-400 tracking-wider flex items-center gap-1.5">
+                    <Sun size={14} className="text-amber-500 animate-pulse" />
+                    TỐI ƯU ÁNH SÁNG CAMERA (LỚP HỌC)
+                  </span>
+                  <button
+                    onClick={() => {
+                      setBrightness(100);
+                      setContrast(100);
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-white transition font-extrabold bg-slate-850 px-2.5 py-1 rounded-lg border border-slate-800"
+                  >
+                    Khôi phục gốc 🔄
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {/* Brightness Controls */}
+                  <div className="flex items-center justify-between bg-slate-950/60 p-2 rounded-xl border border-slate-850">
+                    <div className="flex items-center gap-1.5">
+                      <Sun size={14} className="text-amber-400" />
+                      <span className="text-[10.5px] font-bold text-slate-300">Độ sáng: {brightness}%</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setBrightness(prev => Math.max(50, prev - 10))}
+                        className="w-7 h-7 flex items-center justify-center bg-slate-850 hover:bg-slate-750 border border-slate-800 rounded-lg text-slate-300 font-extrabold text-xs transition cursor-pointer"
+                        title="Giảm độ sáng"
+                      >
+                        -
+                      </button>
+                      <button
+                        onClick={() => setBrightness(prev => Math.min(200, prev + 10))}
+                        className="w-7 h-7 flex items-center justify-center bg-slate-850 hover:bg-slate-750 border border-slate-800 rounded-lg text-slate-300 font-extrabold text-xs transition cursor-pointer"
+                        title="Tăng độ sáng"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Contrast Controls */}
+                  <div className="flex items-center justify-between bg-slate-950/60 p-2 rounded-xl border border-slate-850">
+                    <div className="flex items-center gap-1.5">
+                      <Contrast size={14} className="text-sky-400" />
+                      <span className="text-[10.5px] font-bold text-slate-300">Tương phản: {contrast}%</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setContrast(prev => Math.max(50, prev - 10))}
+                        className="w-7 h-7 flex items-center justify-center bg-slate-850 hover:bg-slate-750 border border-slate-800 rounded-lg text-slate-300 font-extrabold text-xs transition cursor-pointer"
+                        title="Giảm độ tương phản"
+                      >
+                        -
+                      </button>
+                      <button
+                        onClick={() => setContrast(prev => Math.min(200, prev + 10))}
+                        className="w-7 h-7 flex items-center justify-center bg-slate-850 hover:bg-slate-750 border border-slate-800 rounded-lg text-slate-300 font-extrabold text-xs transition cursor-pointer"
+                        title="Tăng độ tương phản"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Preset Modes Row */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[9.5px] font-extrabold text-slate-500 uppercase mr-1">Chế độ sẵn:</span>
+                  <button
+                    onClick={() => { setBrightness(135); setContrast(115); }}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                      brightness === 135 && contrast === 115
+                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-400 font-black'
+                        : 'bg-slate-950/40 border-slate-850 text-slate-400 hover:text-slate-300 hover:bg-slate-850'
+                    }`}
+                  >
+                    🌙 Thiếu Sáng
+                  </button>
+                  <button
+                    onClick={() => { setBrightness(110); setContrast(145); }}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                      brightness === 110 && contrast === 145
+                        ? 'bg-rose-500/15 border-rose-500/30 text-rose-400 font-black'
+                        : 'bg-slate-950/40 border-slate-850 text-slate-400 hover:text-slate-300 hover:bg-slate-850'
+                    }`}
+                  >
+                    🔄 Ngược Sáng
+                  </button>
+                  <button
+                    onClick={() => { setBrightness(85); setContrast(90); }}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                      brightness === 85 && contrast === 90
+                        ? 'bg-sky-500/15 border-sky-500/30 text-sky-400 font-black'
+                        : 'bg-slate-950/40 border-slate-850 text-slate-400 hover:text-slate-300 hover:bg-slate-850'
+                    }`}
+                  >
+                    ☀️ Chói Sáng
+                  </button>
+                  <button
+                    onClick={() => { setBrightness(100); setContrast(100); }}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                      brightness === 100 && contrast === 100
+                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 font-black'
+                        : 'bg-slate-950/40 border-slate-850 text-slate-400 hover:text-slate-300 hover:bg-slate-850'
+                    }`}
+                  >
+                    🌿 Mặc Định
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="mt-3 flex gap-6 text-[11px] font-bold text-slate-400">
               <span className="flex items-center gap-1.5">
@@ -1097,6 +1230,7 @@ export default function CameraAttendance({
               <video
                 ref={videoRef}
                 className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
+                style={{ filter: `brightness(${brightness}%) contrast(${contrast}%)` }}
                 playsInline
                 muted
               />
@@ -1116,11 +1250,19 @@ export default function CameraAttendance({
                 <div className="p-4 bg-slate-800/40 rounded-full">
                   <Camera size={36} className="text-slate-400 stroke-1" />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1 flex flex-col items-center">
                   <h4 className="text-sm font-bold text-slate-300">Camera Đang Tắt</h4>
                   <p className="text-xs text-slate-500 max-w-xs leading-normal">
                     Hệ thống điểm danh sinh trắc học chưa kích hoạt. Bấm nút "Bắt đầu điểm danh" để khởi chạy.
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsPermissionModalOpen(true)}
+                    className="mt-2 text-[10px] text-rose-400 hover:text-rose-350 font-extrabold flex items-center gap-1 cursor-pointer underline decoration-dotted transition-colors"
+                  >
+                    <HelpCircle size={12} />
+                    <span>Hướng dẫn cấp quyền Camera 🔒</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -1173,6 +1315,131 @@ export default function CameraAttendance({
               </div>
             )}
           </div>
+
+          {/* Quick Adjust controls for Brightness & Contrast in Normal View */}
+          {isActive && !hasCameraError && (
+            <div className="w-full max-w-[500px] mt-4 p-4 bg-slate-50 dark:bg-slate-950/40 rounded-2xl border border-slate-100 dark:border-slate-800/80 space-y-3.5 shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-200/50 dark:border-slate-800/60 pb-2.5">
+                <span className="text-xs font-bold text-slate-850 dark:text-slate-100 flex items-center gap-1.5">
+                  <Sun size={14} className="text-amber-500 animate-pulse" />
+                  <span>Tối ưu hình ảnh Camera lớp học</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBrightness(100);
+                    setContrast(100);
+                  }}
+                  className="text-[10px] text-slate-500 dark:text-slate-400 hover:text-slate-850 dark:hover:text-white transition font-extrabold bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800"
+                >
+                  Khôi phục gốc 🔄
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Brightness Controls */}
+                <div className="flex items-center justify-between bg-white dark:bg-slate-900/60 p-2 rounded-xl border border-slate-150 dark:border-slate-800/60">
+                  <div className="flex items-center gap-1.5">
+                    <Sun size={14} className="text-amber-500" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Độ sáng: {brightness}%</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setBrightness(prev => Math.max(50, prev - 10))}
+                      className="w-7 h-7 flex items-center justify-center bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 font-extrabold text-xs transition cursor-pointer"
+                      title="Giảm độ sáng"
+                    >
+                      -
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBrightness(prev => Math.min(200, prev + 10))}
+                      className="w-7 h-7 flex items-center justify-center bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 font-extrabold text-xs transition cursor-pointer"
+                      title="Tăng độ sáng"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* Contrast Controls */}
+                <div className="flex items-center justify-between bg-white dark:bg-slate-900/60 p-2 rounded-xl border border-slate-150 dark:border-slate-800/60">
+                  <div className="flex items-center gap-1.5">
+                    <Contrast size={14} className="text-blue-500" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Tương phản: {contrast}%</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setContrast(prev => Math.max(50, prev - 10))}
+                      className="w-7 h-7 flex items-center justify-center bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 font-extrabold text-xs transition cursor-pointer"
+                      title="Giảm độ tương phản"
+                    >
+                      -
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setContrast(prev => Math.min(200, prev + 10))}
+                      className="w-7 h-7 flex items-center justify-center bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 font-extrabold text-xs transition cursor-pointer"
+                      title="Tăng độ tương phản"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Preset Modes Row */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/40">
+                <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase mr-1">Chế độ nhanh:</span>
+                <button
+                  type="button"
+                  onClick={() => { setBrightness(135); setContrast(115); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    brightness === 135 && contrast === 115
+                      ? 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  🌙 Thiếu Sáng
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setBrightness(110); setContrast(145); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    brightness === 110 && contrast === 145
+                      ? 'bg-rose-500/15 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  🔄 Ngược Sáng
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setBrightness(85); setContrast(90); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    brightness === 85 && contrast === 90
+                      ? 'bg-sky-500/15 border-sky-500/30 text-sky-600 dark:text-sky-400'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  ☀️ Chói Sáng
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setBrightness(100); setContrast(100); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    brightness === 100 && contrast === 100
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  🌿 Mặc Định
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Interactive Fast Face-Scanning & Testing Panel */}
           {isActive && (
@@ -1805,6 +2072,138 @@ export default function CameraAttendance({
                 className="px-5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold uppercase transition hover:bg-slate-50 dark:hover:bg-slate-800/80 cursor-pointer"
               >
                 Đóng Thư Viện
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CAMERA PERMISSION GUIDE MODAL */}
+      {isPermissionModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsPermissionModalOpen(false)} />
+          
+          <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-800 relative z-[130] shadow-2xl animate-scale-in text-slate-800 dark:text-slate-100 flex flex-col max-h-[90vh]">
+            <button 
+              onClick={() => setIsPermissionModalOpen(false)} 
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer z-10 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-full shadow-xs"
+            >
+              <X size={16} />
+            </button>
+
+            {/* Header banner */}
+            <div className="bg-gradient-to-tr from-rose-600 to-amber-600 p-6 text-white space-y-1 relative shrink-0">
+              <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.15),transparent)]" />
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/10 rounded-xl">
+                  <Camera size={24} className="text-white animate-pulse" />
+                </div>
+                <div>
+                  <p className="text-[10px] tracking-widest uppercase font-extrabold opacity-75">Quyền Truy Cập Thiết Bị</p>
+                  <h3 className="text-lg font-extrabold flex items-center gap-2">
+                    Hướng Dẫn Cấp Quyền Camera 🔒
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            {/* Scrollable Content */}
+            <div className="p-6 overflow-y-auto space-y-5 text-sm">
+              <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-400 rounded-2xl flex gap-3 text-xs">
+                <AlertCircle size={18} className="shrink-0 mt-0.5 text-amber-500" />
+                <div className="space-y-1">
+                  <span className="font-extrabold block">TẠI SAO CẦN CẤP QUYỀN?</span>
+                  <p className="leading-relaxed font-medium">
+                    Trình duyệt web cần được cho phép truy cập camera để thực hiện việc nhận diện sinh trắc học gương mặt học sinh và quét mã QR định danh khi điểm danh.
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 1: On Desktop */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
+                  💻 CÁCH LÀM TRÊN MÁY TÍNH (Chrome, Edge, Cốc Cốc, Safari)
+                </h4>
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-150 dark:border-slate-800 space-y-3.5 text-xs">
+                  <div className="flex gap-3">
+                    <span className="w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center font-extrabold shrink-0">1</span>
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-slate-100">Tìm biểu tượng bảo mật trên thanh địa chỉ</p>
+                      <p className="text-slate-500 dark:text-slate-400 mt-1">
+                        Nhìn lên góc trái thanh nhập địa chỉ trang web (kế bên URL của trang), nhấp vào biểu tượng <strong className="text-slate-700 dark:text-slate-300">Ổ khóa 🔒</strong> hoặc <strong className="text-slate-700 dark:text-slate-300">Cài đặt trang web ⚙️</strong>.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 border-t border-slate-200/60 dark:border-slate-800/40 pt-3.5">
+                    <span className="w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center font-extrabold shrink-0">2</span>
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-slate-100">Bật cho phép quyền Camera</p>
+                      <p className="text-slate-500 dark:text-slate-400 mt-1">
+                        Tìm mục <strong className="text-slate-700 dark:text-slate-300">Máy ảnh (Camera)</strong> và đổi trạng thái từ <span className="text-rose-500 font-bold">Chặn / Hỏi</span> thành <span className="text-emerald-500 font-bold uppercase">Cho phép (Allow) 🟢</span>.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 border-t border-slate-200/60 dark:border-slate-800/40 pt-3.5">
+                    <span className="w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center font-extrabold shrink-0">3</span>
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-slate-100">Tải lại trang và bắt đầu</p>
+                      <p className="text-slate-500 dark:text-slate-400 mt-1">
+                        Nhấn phím <strong className="text-slate-700 dark:text-slate-300">F5</strong> hoặc biểu tượng vòng xoay 🔄 của trình duyệt để tải lại trang, sau đó bấm lại nút <strong className="text-rose-500 font-bold">Bắt đầu điểm danh</strong>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 2: On Mobile */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
+                  📱 CÁCH LÀM TRÊN ĐIỆN THOẠI (iPhone, Android)
+                </h4>
+                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-150 dark:border-slate-800 space-y-3.5 text-xs">
+                  <div className="flex gap-3">
+                    <span className="w-5 h-5 bg-amber-500 text-white rounded-full flex items-center justify-center font-extrabold shrink-0">1</span>
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-slate-100">Kiểm tra thông báo chặn trên màn hình</p>
+                      <p className="text-slate-500 dark:text-slate-400 mt-1">
+                        Khi nhấn "Bật Camera", nếu có hộp thoại hiện lên hỏi quyền truy cập, hãy bấm chọn <strong className="text-emerald-500 font-bold">Cho phép (Allow)</strong> hoặc <strong className="text-emerald-500 font-bold">Trong khi dùng ứng dụng</strong>.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 border-t border-slate-200/60 dark:border-slate-800/40 pt-3.5">
+                    <span className="w-5 h-5 bg-amber-500 text-white rounded-full flex items-center justify-center font-extrabold shrink-0">2</span>
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-slate-100">Bật lại trong cài đặt hệ thống (nếu đã lỡ chặn)</p>
+                      <ul className="list-disc pl-4 mt-1 text-slate-500 dark:text-slate-400 space-y-1">
+                        <li><strong>iOS (Safari):</strong> Vào Cài đặt hệ thống ⚙️ -&gt; Safari -&gt; Quyền truy cập Camera -&gt; đổi thành Cho phép.</li>
+                        <li><strong>Android (Chrome):</strong> Nhấp biểu tượng 3 chấm ở góc trên -&gt; Cài đặt -&gt; Cài đặt trang web -&gt; Máy ảnh -&gt; bật Cho phép.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer options */}
+            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/25 border-t border-slate-150 dark:border-slate-850 flex items-center justify-between gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPermissionModalOpen(false);
+                  stopScanningSession();
+                  setTimeout(startScanningSession, 150);
+                }}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
+              >
+                <Play size={14} />
+                <span>Thử Kích Hoạt Lại Camera 📷</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPermissionModalOpen(false)}
+                className="px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold uppercase transition hover:bg-slate-50 dark:hover:bg-slate-800/80 cursor-pointer"
+              >
+                Đã hiểu 👌
               </button>
             </div>
           </div>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, ParentAccount, WeeklyMenu, AbsenceReport, TeacherAccount, HealthRecord, DailyAssessment, TeacherNotification, SchoolEvent, ClassActivity, ParentNotification } from '../types';
+import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, ParentAccount, WeeklyMenu, AbsenceReport, TeacherAccount, HealthRecord, DailyAssessment, TeacherNotification, SchoolEvent, ClassActivity, ParentNotification, MedicationRequest } from '../types';
 import { generateMockEmbedding } from './faceSim';
 import {
   saveSettingsToFirebase,
@@ -41,6 +41,7 @@ const KEYS = {
   TEACHER_NOTIFICATIONS: 'sma_teacher_notifications',
   PARENT_NOTIFICATIONS: 'sma_parent_notifications',
   EVENTS: 'sma_school_events',
+  MEDICATION_REQUESTS: 'sma_medication_requests',
 };
 
 // Thực đơn tuần mầm non mặc định
@@ -1224,5 +1225,76 @@ export class StorageService {
 
   public static saveParentNotifications(notifications: ParentNotification[]) {
     localStorage.setItem(KEYS.PARENT_NOTIFICATIONS, JSON.stringify(notifications));
+  }
+
+  // --- MEDICATION REQUESTS ---
+  public static getMedicationRequests(): MedicationRequest[] {
+    this.initialize();
+    try {
+      const data = localStorage.getItem(KEYS.MEDICATION_REQUESTS);
+      if (!data) {
+        // Mock some initial data if none exists so there's rich visual state
+        const mockRequests: MedicationRequest[] = [
+          {
+            id: 'med_1',
+            studentId: 'std_1',
+            studentName: 'Nguyễn Minh Quân',
+            classId: 'c1',
+            className: 'Lớp Lớn Măng Non (c1)',
+            diagnosis: 'Cảm cúm nhẹ, ho khan',
+            medicineName: 'Siro Ho Prospan 5ml & Decolgen 1/2 viên',
+            dosage: 'Uống sau giờ ăn trưa lúc 11:45. Siro uống trực tiếp, Decolgen hòa tan với nước ấm dặn bé uống hết.',
+            prescriptionPhoto: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?q=80&w=300&auto=format&fit=crop',
+            parentConfirmed: true,
+            parentPhone: '0901234567',
+            parentName: 'Nguyễn Văn Hải (Ba)',
+            teacherConfirmed: true,
+            teacherConfirmedBy: 'Cô Trúc',
+            teacherConfirmedAt: '2026-07-13 11:50:00',
+            createdAt: '2026-07-13 07:45:00'
+          },
+          {
+            id: 'med_2',
+            studentId: 'std_2',
+            studentName: 'Lê Mai Anh',
+            classId: 'c1',
+            className: 'Lớp Lớn Măng Non (c1)',
+            diagnosis: 'Phát ban nhẹ dị ứng thời tiết',
+            medicineName: 'Kem bôi ngoài da Hidem Cream',
+            dosage: 'Bôi một lớp mỏng lên vùng da mẩn đỏ ở hai cánh tay sau khi tắm trưa xong (khoảng 14:30)',
+            prescriptionPhoto: 'https://images.unsplash.com/photo-1550572017-edd951b55104?q=80&w=300&auto=format&fit=crop',
+            parentConfirmed: true,
+            parentPhone: '0912345678',
+            parentName: 'Lê Thị Mai (Mẹ)',
+            teacherConfirmed: false,
+            createdAt: '2026-07-13 08:15:00'
+          }
+        ];
+        localStorage.setItem(KEYS.MEDICATION_REQUESTS, JSON.stringify(mockRequests));
+        return mockRequests;
+      }
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  public static saveMedicationRequests(requests: MedicationRequest[]) {
+    localStorage.setItem(KEYS.MEDICATION_REQUESTS, JSON.stringify(requests));
+  }
+
+  public static addMedicationRequest(req: MedicationRequest) {
+    const requests = this.getMedicationRequests();
+    requests.unshift(req);
+    this.saveMedicationRequests(requests);
+  }
+
+  public static updateMedicationRequest(updated: MedicationRequest) {
+    const requests = this.getMedicationRequests();
+    const index = requests.findIndex(r => r.id === updated.id);
+    if (index !== -1) {
+      requests[index] = updated;
+      this.saveMedicationRequests(requests);
+    }
   }
 }

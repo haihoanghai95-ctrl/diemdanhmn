@@ -22,7 +22,11 @@ import {
   Calendar,
   Layers,
   FileText,
-  Printer
+  Printer,
+  Pill,
+  CheckCircle2,
+  Clock,
+  ShieldCheck
 } from 'lucide-react';
 import { Student, Classroom, SchoolSettings, HealthRecord } from '../types';
 import { StorageService } from '../utils/storage';
@@ -53,6 +57,54 @@ export default function Health({ students, classrooms, settings }: HealthProps) 
   const [healthRecords, setHealthRecords] = useState<HealthRecord[]>(() => 
     StorageService.getHealthRecords()
   );
+
+  const [healthActiveTab, setHealthActiveTab] = useState<'indicators' | 'medication'>('indicators');
+  const [medicationRequests, setMedicationRequests] = useState<any[]>(() =>
+    StorageService.getMedicationRequests()
+  );
+  const [selectedPhotoModal, setSelectedPhotoModal] = useState<string | null>(null);
+
+  const handleTeacherConfirmMedication = (id: string) => {
+    const updated = medicationRequests.map(req => {
+      if (req.id === id) {
+        return {
+          ...req,
+          status: 'taken',
+          teacherConfirmed: true,
+          teacherConfirmedBy: 'Cô giáo chủ nhiệm',
+          teacherConfirmedAt: new Date().toISOString().replace('T', ' ').substring(0, 16)
+        };
+      }
+      return req;
+    });
+    setMedicationRequests(updated);
+    StorageService.saveMedicationRequests(updated);
+  };
+
+  const handleUpdateMedicationStatus = (id: string, newStatus: 'pending' | 'received' | 'taken') => {
+    const updated = medicationRequests.map(req => {
+      if (req.id === id) {
+        return {
+          ...req,
+          status: newStatus,
+          teacherConfirmed: newStatus === 'taken',
+          teacherConfirmedBy: newStatus === 'taken' ? 'Cô giáo chủ nhiệm' : (newStatus === 'pending' ? undefined : req.teacherConfirmedBy),
+          teacherConfirmedAt: newStatus === 'taken'
+            ? new Date().toISOString().replace('T', ' ').substring(0, 16)
+            : (newStatus === 'pending' ? undefined : req.teacherConfirmedAt)
+        };
+      }
+      return req;
+    });
+    setMedicationRequests(updated);
+    StorageService.saveMedicationRequests(updated);
+  };
+
+  const getMedStatus = (req: any): 'pending' | 'received' | 'taken' => {
+    if (req.teacherConfirmed || req.status === 'taken') return 'taken';
+    if (req.status === 'received') return 'received';
+    return 'pending';
+  };
 
   // Modal State
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
@@ -372,7 +424,41 @@ export default function Health({ students, classrooms, settings }: HealthProps) 
         </div>
       </div>
 
-      {/* STATS BENTO TILES */}
+      {/* Sub-tab Navigation */}
+      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2 no-print">
+        <button
+          type="button"
+          onClick={() => setHealthActiveTab('indicators')}
+          className={`pb-2.5 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+            healthActiveTab === 'indicators'
+              ? `border-${accentColor}-500 text-${accentColor}-600 dark:text-${accentColor}-400 font-extrabold`
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          📐 Quản lý chỉ số thể chất
+        </button>
+        <button
+          type="button"
+          onClick={() => setHealthActiveTab('medication')}
+          className={`pb-2.5 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+            healthActiveTab === 'medication'
+              ? `border-${accentColor}-500 text-${accentColor}-600 dark:text-${accentColor}-400 font-extrabold`
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          💊 Đơn dặn thuốc từ phụ huynh
+          {medicationRequests.filter(r => !r.teacherConfirmed).length > 0 && (
+            <span className="bg-rose-600 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black animate-pulse">
+              {medicationRequests.filter(r => !r.teacherConfirmed).length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {healthActiveTab === 'indicators' ? (
+        <div className="space-y-6">
+
+          {/* STATS BENTO TILES */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         {/* Total measured */}
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs flex items-center gap-4.5 col-span-2">
@@ -505,6 +591,143 @@ export default function Health({ students, classrooms, settings }: HealthProps) 
                 />
               </BarChart>
             </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* 📋 THEO DÕI ĐƠN GỬI THUỐC HÀNG NGÀY CHO GIÁO VIÊN */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/60 dark:border-slate-800 p-6 shadow-xs space-y-4 no-print">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-rose-500/10 text-rose-500 rounded-xl">
+              <Pill size={20} className="animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight flex items-center gap-2">
+                Theo Dõi Đơn Gửi Thuốc Từ Phụ Huynh 💊
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">Danh sách đơn gửi thuốc hiện có — Giáo viên cập nhật trạng thái thuốc nhanh cho bé</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="px-2.5 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-bold rounded-lg flex items-center gap-1">
+              ⏳ Chờ: {medicationRequests.filter(r => getMedStatus(r) === 'pending').length}
+            </span>
+            <span className="px-2.5 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded-lg flex items-center gap-1">
+              📥 Đã nhận: {medicationRequests.filter(r => getMedStatus(r) === 'received').length}
+            </span>
+            <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold rounded-lg flex items-center gap-1">
+              ✔️ Đã uống: {medicationRequests.filter(r => getMedStatus(r) === 'taken').length}
+            </span>
+          </div>
+        </div>
+
+        {medicationRequests.length === 0 ? (
+          <div className="text-center py-8 text-slate-400 text-xs font-medium italic bg-slate-50/50 dark:bg-slate-850/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800/85">
+            Chưa có đơn dặn thuốc nào được gửi từ phụ huynh học sinh hôm nay.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse min-w-[600px]">
+              <thead>
+                <tr className="bg-slate-50/75 dark:bg-slate-850/50 text-slate-400 font-extrabold border-b border-slate-200/65 dark:border-slate-800 text-[10px] uppercase tracking-wider">
+                  <th className="px-4 py-3 font-extrabold">Tên bé</th>
+                  <th className="px-4 py-3 font-extrabold">Tên thuốc & Chỉ định</th>
+                  <th className="px-4 py-3 font-extrabold">Trạng thái</th>
+                  <th className="px-4 py-3 text-right font-extrabold">Cập nhật nhanh</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-150 dark:divide-slate-850 font-medium text-slate-750 dark:text-slate-300">
+                {medicationRequests.map(req => {
+                  const status = getMedStatus(req);
+                  return (
+                    <tr key={req.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/10 transition">
+                      <td className="px-4 py-3.5">
+                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>👶 {req.studentName}</span>
+                          <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-md text-[9px] font-bold">
+                            Lớp {req.className || 'Mầm Non'}
+                          </span>
+                        </div>
+                        <span className="block text-[10px] text-slate-400 font-semibold mt-0.5">Triệu chứng: {req.diagnosis}</span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                          <span>💊 {req.medicineName}</span>
+                          {req.prescriptionPhoto && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPhotoModal(req.prescriptionPhoto)}
+                              className="text-blue-500 hover:text-blue-600 dark:text-blue-400 text-[9px] font-bold underline ml-1.5 cursor-pointer flex items-center gap-0.5"
+                            >
+                              [Ảnh 📸]
+                            </button>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 truncate max-w-[280px] mt-0.5" title={req.dosage}>
+                          HD: {req.dosage}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {status === 'taken' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                            Đã uống
+                          </span>
+                        ) : status === 'received' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                            Đã nhận
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                            Chờ xác nhận
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-right">
+                        <div className="flex justify-end items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateMedicationStatus(req.id, 'pending')}
+                            className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold border transition-all cursor-pointer ${
+                              status === 'pending'
+                                ? 'bg-amber-500/15 border-amber-300 text-amber-600 dark:text-amber-400 shadow-3xs'
+                                : 'bg-white dark:bg-slate-900 hover:bg-slate-50 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
+                            }`}
+                          >
+                            Chờ xác nhận ⏳
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateMedicationStatus(req.id, 'received')}
+                            className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold border transition-all cursor-pointer ${
+                              status === 'received'
+                                ? 'bg-blue-500/15 border-blue-300 text-blue-600 dark:text-blue-400 shadow-3xs'
+                                : 'bg-white dark:bg-slate-900 hover:bg-slate-50 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
+                            }`}
+                          >
+                            Đã nhận 📥
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateMedicationStatus(req.id, 'taken')}
+                            className={`px-2.5 py-1.5 rounded-xl text-[10px] font-extrabold border transition-all cursor-pointer ${
+                              status === 'taken'
+                                ? 'bg-emerald-500/15 border-emerald-300 text-emerald-600 dark:text-emerald-400 shadow-3xs'
+                                : 'bg-white dark:bg-slate-900 hover:bg-slate-50 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
+                            }`}
+                          >
+                            Đã uống 💊
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -707,6 +930,389 @@ export default function Health({ students, classrooms, settings }: HealthProps) 
           </div>
         )}
       </div>
+      </div>
+      ) : (
+        <div className="space-y-6 animate-fade-in">
+          
+          {/* Medication search and filters */}
+          <div className="no-print bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Tìm đơn dặn thuốc theo tên học sinh, tên thuốc..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl text-xs border border-transparent focus:border-slate-200 dark:focus:border-slate-800 outline-hidden transition"
+              />
+            </div>
+
+            <div className="flex gap-2 shrink-0">
+              <div className="relative flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-850 border border-slate-200/50 dark:border-slate-800/80 rounded-xl text-xs">
+                <Filter size={14} className="text-slate-400" />
+                <span className="text-slate-500">Lớp:</span>
+                <select
+                  value={classFilter}
+                  onChange={(e) => setClassFilter(e.target.value)}
+                  className="bg-transparent font-bold text-slate-700 dark:text-slate-200 outline-hidden cursor-pointer"
+                >
+                  <option value="all" className="bg-white dark:bg-slate-900">Tất cả lớp</option>
+                  {classrooms.map(c => (
+                    <option key={c.id} value={c.id} className="bg-white dark:bg-slate-900">{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Medication Tracking Control Panel */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/60 dark:border-slate-800 p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <Layers size={18} className="text-rose-500" />
+                  Bảng Điều Khiển Theo Dõi Trạng Thái Thuốc Nhanh
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Giáo viên theo dõi trạng thái thuốc phụ huynh gửi và cập nhật nhanh các trạng thái.</p>
+              </div>
+              <span className="px-2.5 py-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[10px] font-bold rounded-lg self-start sm:self-center">
+                Thời gian thực
+              </span>
+            </div>
+
+            {(() => {
+              const filteredMeds = medicationRequests.filter(req => {
+                if (classFilter !== 'all' && req.classId !== classFilter) return false;
+                if (searchTerm.trim()) {
+                  const term = searchTerm.toLowerCase();
+                  return (
+                    req.studentName.toLowerCase().includes(term) ||
+                    req.medicineName.toLowerCase().includes(term) ||
+                    req.diagnosis.toLowerCase().includes(term)
+                  );
+                }
+                return true;
+              }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+              if (filteredMeds.length === 0) {
+                return (
+                  <div className="text-center py-6 text-slate-400 text-xs font-medium italic bg-slate-50/50 dark:bg-slate-850/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800/85">
+                    Không có đơn thuốc nào phù hợp với bộ lọc hiển thị.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/75 dark:bg-slate-850/50 text-slate-400 font-extrabold border-b border-slate-200/65 dark:border-slate-800 text-[10px] uppercase tracking-wider">
+                        <th className="px-4 py-3 font-extrabold">Tên bé</th>
+                        <th className="px-4 py-3 font-extrabold">Tên thuốc</th>
+                        <th className="px-4 py-3 font-extrabold">Trạng thái</th>
+                        <th className="px-4 py-3 text-right font-extrabold">Cập nhật nhanh</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150 dark:divide-slate-850 font-medium text-slate-750 dark:text-slate-300">
+                      {filteredMeds.map(req => {
+                        const status = getMedStatus(req);
+                        return (
+                          <tr key={req.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/10 transition">
+                            <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">
+                              {req.studentName}
+                              <span className="block text-[9px] text-slate-400 font-semibold mt-0.5">Lớp {req.className || 'Mầm Non'}</span>
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-rose-600 dark:text-rose-400">
+                              {req.medicineName}
+                            </td>
+                            <td className="px-4 py-3">
+                              {status === 'taken' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-lg text-[10px] font-black">
+                                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                                  Đã uống
+                                </span>
+                              ) : status === 'received' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded-lg text-[10px] font-black">
+                                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                                  Đã nhận
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded-lg text-[10px] font-black">
+                                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                                  Chờ xác nhận
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex justify-end items-center gap-1.5">
+                                {status === 'pending' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateMedicationStatus(req.id, 'received')}
+                                      className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase rounded-xl transition cursor-pointer shadow-xs active:scale-95"
+                                    >
+                                      📥 Đã nhận
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateMedicationStatus(req.id, 'taken')}
+                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase rounded-xl transition cursor-pointer shadow-xs active:scale-95"
+                                    >
+                                      💊 Đã uống
+                                    </button>
+                                  </>
+                                )}
+                                {status === 'received' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateMedicationStatus(req.id, 'taken')}
+                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase rounded-xl transition cursor-pointer shadow-xs active:scale-95"
+                                    >
+                                      💊 Đã uống
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateMedicationStatus(req.id, 'pending')}
+                                      className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-550 dark:text-slate-400 rounded-xl transition cursor-pointer"
+                                      title="Đặt lại về Chờ xác nhận"
+                                    >
+                                      🔄 Trả về chờ
+                                    </button>
+                                  </>
+                                )}
+                                {status === 'taken' && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg">✔️ Hoàn thành</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateMedicationStatus(req.id, 'received')}
+                                      className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-550 dark:text-slate-400 rounded-xl transition cursor-pointer"
+                                      title="Quay lại trạng thái Đã nhận"
+                                    >
+                                      🔄 Đã nhận
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Teacher's Medication Board */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/60 dark:border-slate-800 p-6 shadow-xs space-y-4">
+            <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+              <Pill size={18} className="text-rose-500" />
+              Danh Sách Đơn Dặn Thuốc Y Tế Từ Phụ Huynh ({medicationRequests.length})
+            </h3>
+            <p className="text-xs text-slate-450 font-medium">Giáo viên xem dặn dò chi tiết, kiểm tra đơn thuốc/toa thuốc đính kèm và xác nhận sau khi cho bé uống thuốc thành công.</p>
+
+            {(() => {
+              const filteredMeds = medicationRequests.filter(req => {
+                if (classFilter !== 'all' && req.classId !== classFilter) return false;
+                if (searchTerm.trim()) {
+                  const term = searchTerm.toLowerCase();
+                  return (
+                    req.studentName.toLowerCase().includes(term) ||
+                    req.medicineName.toLowerCase().includes(term) ||
+                    req.diagnosis.toLowerCase().includes(term)
+                  );
+                }
+                return true;
+              }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+              if (filteredMeds.length === 0) {
+                return (
+                  <div className="text-center py-12 text-slate-400 text-xs font-medium italic bg-slate-50 dark:bg-slate-850/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800/80">
+                    Chưa nhận được đơn dặn thuốc nào trùng khớp với bộ lọc.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4 text-xs">
+                  {filteredMeds.map(req => {
+                    const currentStatus = getMedStatus(req);
+                    return (
+                      <div
+                        key={req.id}
+                        className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-150 dark:border-slate-800 flex flex-col md:flex-row justify-between gap-4 hover:border-slate-200 dark:hover:border-slate-750 transition animate-fade-in"
+                      >
+                        <div className="space-y-2.5 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                              👶 {req.studentName} - Lớp {req.className || 'Mầm Non'}
+                            </span>
+                            <span className="px-2 py-0.5 bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300 rounded-md text-[9px] font-bold">
+                              🏥 {req.diagnosis}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono font-semibold">
+                              Thời gian gửi: {req.createdAt}
+                            </span>
+                          </div>
+
+                          {req.medicines && req.medicines.length > 0 ? (
+                            <div className="space-y-2 mt-2">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Chi tiết đơn thuốc gửi cô ({req.medicines.length} loại):</p>
+                              <div className="grid grid-cols-1 gap-2">
+                                {req.medicines.map((item: any, mIdx: number) => (
+                                  <div key={item.id || mIdx} className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 p-2.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-xs font-extrabold text-slate-800 dark:text-white">💊 {item.name}</span>
+                                        <span className="px-1.5 py-0.5 bg-rose-500/10 text-rose-500 rounded-md font-bold text-[9px] uppercase">Liều: {item.dosage}</span>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      {item.timing && item.timing.map((t: string) => (
+                                        <span key={t} className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md font-bold text-[9px]">☀️ {t}</span>
+                                      ))}
+                                      {item.mealRelation && item.mealRelation !== 'none' && (
+                                        <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md font-bold text-[9px] uppercase">
+                                          {item.mealRelation === 'before' ? 'Trước ăn 🍽️' : 'Sau ăn 🥣'}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <p className="text-xs font-black text-slate-850 dark:text-white">
+                                Tên thuốc: <span className="text-rose-600 dark:text-rose-400 font-extrabold">{req.medicineName}</span>
+                              </p>
+                              <div className="text-xs text-slate-500 dark:text-slate-450 font-medium leading-relaxed bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-100 dark:border-slate-800/80">
+                                <strong className="text-slate-700 dark:text-slate-200 block mb-1 text-[10px] uppercase">Hướng dẫn của phụ huynh:</strong>
+                                {req.dosage}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Confirmation status cards */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] font-bold">
+                            <div className="p-2 bg-emerald-500/5 text-emerald-600 rounded-xl flex items-center gap-1.5 border border-emerald-500/10">
+                              <CheckCircle2 size={12} />
+                              <span>Phụ huynh xác nhận: ĐÃ KÝ ĐỒNG Ý GỬI THUỐC ✍️</span>
+                            </div>
+
+                            {(() => {
+                              if (currentStatus === 'taken') {
+                                return (
+                                  <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-xl flex flex-col justify-center gap-0.5 border border-emerald-500/20">
+                                    <div className="flex items-center gap-1.5">
+                                      <ShieldCheck size={12} className="text-emerald-500" />
+                                      <span>Xác nhận giáo viên: ĐÃ CHO UỐNG THUỐC ✅</span>
+                                    </div>
+                                    <span className="text-[8px] text-slate-400 font-medium pl-3.5 block">
+                                      Xác nhận bởi: {req.teacherConfirmedBy || 'Cô giáo chủ nhiệm'} lúc {req.teacherConfirmedAt || req.createdAt}
+                                    </span>
+                                  </div>
+                                );
+                              } else if (currentStatus === 'received') {
+                                return (
+                                  <div className="p-2 bg-blue-500/10 text-blue-600 rounded-xl flex items-center gap-1.5 border border-blue-500/20">
+                                    <CheckCircle2 size={12} className="text-blue-500" />
+                                    <span>Xác nhận giáo viên: ĐÃ NHẬN THUỐC ĐỦ 📥</span>
+                                  </div>
+                                );
+                              } else {
+                                return (
+                                  <div className="p-2 bg-amber-500/15 text-amber-700 dark:text-amber-400 rounded-xl flex items-center gap-1.5 border border-amber-500/20 animate-pulse">
+                                    <Clock size={12} className="text-amber-500" />
+                                    <span>Giáo viên: CHỜ XÁC NHẬN NHẬN THUỐC ⏳</span>
+                                  </div>
+                                );
+                              }
+                            })()}
+                          </div>
+                        </div>
+
+                        <div className="flex md:flex-col items-center justify-between md:justify-start gap-4 md:items-end shrink-0">
+                          {/* Prescription image */}
+                          {req.prescriptionPhoto ? (
+                            <div
+                              onClick={() => setSelectedPhotoModal(req.prescriptionPhoto || null)}
+                              className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 cursor-pointer shadow-xs hover:scale-105 transition"
+                            >
+                              <img src={req.prescriptionPhoto} alt="Prescription" className="w-full h-full object-cover" referrerpolicy="no-referrer" />
+                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white text-[9px] font-bold uppercase opacity-0 hover:opacity-100 transition-opacity">
+                                Xem ảnh
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 rounded-xl border border-slate-200/50 dark:border-slate-800/60 bg-slate-100 dark:bg-slate-900 flex flex-col items-center justify-center text-slate-300 text-[8px] font-bold">
+                              <span>Không có</span>
+                              <span>hình ảnh</span>
+                            </div>
+                          )}
+
+                          {/* Quick action buttons on card */}
+                          <div className="flex flex-col gap-1.5 w-full">
+                            {currentStatus === 'pending' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateMedicationStatus(req.id, 'received')}
+                                  className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-black uppercase text-[10px] tracking-wider rounded-xl shadow-xs transition cursor-pointer active:scale-95 flex items-center gap-1 w-full text-center justify-center"
+                                >
+                                  📥 Đã nhận thuốc
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateMedicationStatus(req.id, 'taken')}
+                                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider rounded-xl shadow-xs transition cursor-pointer active:scale-95 flex items-center gap-1 w-full text-center justify-center"
+                                >
+                                  💊 Đã cho uống
+                                </button>
+                              </>
+                            )}
+                            {currentStatus === 'received' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateMedicationStatus(req.id, 'taken')}
+                                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider rounded-xl shadow-xs transition cursor-pointer active:scale-95 flex items-center gap-1 w-full text-center justify-center"
+                                >
+                                  💊 Đã cho uống
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateMedicationStatus(req.id, 'pending')}
+                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-500 rounded-lg text-[10px] font-bold transition cursor-pointer text-center"
+                                >
+                                  🔄 Trả về chờ
+                                </button>
+                              </>
+                            )}
+                            {currentStatus === 'taken' && (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateMedicationStatus(req.id, 'received')}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-550 rounded-lg text-[10px] font-bold transition cursor-pointer text-center"
+                              >
+                                🔄 Đặt về Đã nhận
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* UPDATE MODAL DIALOG */}
       {isUpdateModalOpen && selectedStudent && (
@@ -865,6 +1471,41 @@ export default function Health({ students, classrooms, settings }: HealthProps) 
 
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* Zoomable Prescription Photo Dialog */}
+      {selectedPhotoModal && (
+        <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-[200] animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden max-w-xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl relative animate-scale-in">
+            <button
+              onClick={() => setSelectedPhotoModal(null)}
+              className="absolute top-4 right-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 p-2 rounded-full text-slate-500 dark:text-slate-300 transition cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+            <div className="p-6 space-y-4">
+              <h3 className="text-sm font-extrabold text-slate-850 dark:text-white uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 pb-3 font-sans">
+                📷 Ảnh đơn thuốc / Toa thuốc chi tiết
+              </h3>
+              <div className="bg-slate-50 dark:bg-slate-950 rounded-2xl overflow-hidden border border-slate-150 dark:border-slate-800 flex items-center justify-center max-h-[70vh]">
+                <img
+                  src={selectedPhotoModal}
+                  alt="Prescription Large Preview"
+                  className="max-h-[60vh] max-w-full object-contain"
+                  referrerpolicy="no-referrer"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setSelectedPhotoModal(null)}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition text-xs cursor-pointer"
+                >
+                  Đóng ảnh
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

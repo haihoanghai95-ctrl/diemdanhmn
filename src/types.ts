@@ -238,6 +238,35 @@ export interface ParentNotification {
   isRead: boolean;
 }
 
+export interface MedicineItem {
+  id: string;
+  name: string;      // Tên thuốc, ví dụ: "Viên thuốc A"
+  dosage: string;    // Liều dùng: "1 viên", "5ml"
+  timing: string[];  // Thời điểm: Sáng, Trưa, Chiều, Tối (e.g. ['morning', 'noon', 'afternoon', 'evening'])
+  mealRelation: 'before' | 'after' | 'none'; // Trước ăn, Sau ăn, Không yêu cầu
+}
+
+export interface MedicationRequest {
+  id: string;
+  studentId: string;
+  studentName: string;
+  classId: string;
+  className: string;
+  diagnosis: string; // Định bệnh
+  medicineName: string; // Tên thuốc (for backward-compatibility, e.g. list of names combined)
+  dosage: string; // Liều dùng / hướng dẫn sử dụng (for backward-compatibility, e.g. combined instructions)
+  prescriptionPhoto?: string; // Ảnh đơn thuốc hoặc hình chụp thuốc (Data URL)
+  parentConfirmed: boolean; // Xác nhận phụ huynh gửi thuốc
+  parentPhone: string;
+  parentName: string;
+  teacherConfirmed: boolean; // Xác nhận của giáo viên
+  teacherConfirmedBy?: string; // Tên giáo viên xác nhận
+  teacherConfirmedAt?: string; // Thời gian giáo viên xác nhận (YYYY-MM-DD HH:MM:SS)
+  createdAt: string; // Ngày gửi thuốc (YYYY-MM-DD HH:MM:SS)
+  medicines?: MedicineItem[]; // Danh sách các loại thuốc chi tiết (Thêm mới)
+}
+
+
 
 
 
